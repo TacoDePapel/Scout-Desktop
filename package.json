@@ -1,0 +1,52 @@
+{
+  "name": "scout-desktop",
+  "version": "1.0.0",
+  "description": "Scout — AI workflow capture by Orage AI Agency",
+  "main": "main.js",
+  "author": "Orage AI Agency <team@orage.agency>",
+  "scripts": {
+    "start": "electron .",
+    "gen-icon": "node scripts/gen-icon.js",
+    "dist": "npm run gen-icon && electron-builder --win"
+  },
+  "build": {
+    "appId": "agency.orage.scout",
+    "productName": "Scout",
+    "copyright": "Copyright © 2025 Orage AI Agency",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "app.css"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Scout",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}

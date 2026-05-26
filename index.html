@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src https://*.supabase.co wss://*.supabase.co;" />
+  <title>Scout</title>
+  <link rel="stylesheet" href="./app.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Supabase JS client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <!-- fflate — fast zip for "Export all skills" -->
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8/umd/index.js"></script>
+  <!-- marked.js — markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>
