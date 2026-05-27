@@ -1,5 +1,16 @@
 # Scout Desktop
 
+## What's New
+
+**May 26, 2026**
+- **Scout can now do things for you.** There's a new Agent tab. Type what you want done — "check my GitHub repo and summarize the latest changes" or "create a project folder on my Desktop with a README" — and Scout's AI will just do it. No clicking around, no copy-pasting. It runs commands, opens your browser, reads and writes files, all on its own.
+- **It shows you exactly what it's doing.** Every step the AI takes appears live on screen as it happens — what command it ran, what it found, what it wrote. Nothing happens in the dark.
+- **Passwords and API keys are handled safely.** If the AI uses a credential during a task, it notices and asks you: "Want to save this?" If you say yes, it saves it to a secure file on your computer. You approve everything before anything is stored.
+- **Every task becomes a guide.** Whether you record yourself doing something or let the AI do it, Scout always turns the session into a clean step-by-step skill file you can reuse or share.
+- **Published to GitHub.** The full source code and the installer are now publicly available at this repo.
+
+---
+
 > **Your AI teammate that lives on your computer.**
 > Record what you do and Scout turns it into a skill guide — or just tell Scout what you want done and it handles it for you.
 
