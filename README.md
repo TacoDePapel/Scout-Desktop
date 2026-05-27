@@ -2,12 +2,16 @@
 
 ## What's New
 
-**May 26, 2026**
-- **Scout can now do things for you.** There's a new Agent tab. Type what you want done — "check my GitHub repo and summarize the latest changes" or "create a project folder on my Desktop with a README" — and Scout's AI will just do it. No clicking around, no copy-pasting. It runs commands, opens your browser, reads and writes files, all on its own.
-- **It shows you exactly what it's doing.** Every step the AI takes appears live on screen as it happens — what command it ran, what it found, what it wrote. Nothing happens in the dark.
-- **Passwords and API keys are handled safely.** If the AI uses a credential during a task, it notices and asks you: "Want to save this?" If you say yes, it saves it to a secure file on your computer. You approve everything before anything is stored.
-- **Every task becomes a guide.** Whether you record yourself doing something or let the AI do it, Scout always turns the session into a clean step-by-step skill file you can reuse or share.
-- **Published to GitHub.** The full source code and the installer are now publicly available at this repo.
+**May 26, 2026 — v2.0**
+- **Scout now runs in the background.** Start a task in the Agent tab and Scout handles it while you keep using your computer normally. You don't have to wait, watch, or babysit it. When it's done, the result appears and a skill guide is saved automatically.
+- **Scout watches your screen.** The new Monitor tab takes a screenshot of your desktop every 10 seconds and keeps the last 5 minutes of activity. Nothing is uploaded — it all stays on your machine. When something interesting happens, you can turn it into a skill in one click.
+- **The agent can use any tool you give it.** Scout now connects to MCP servers — the same ones Claude Code uses — so it can talk to Slack, GitHub, Notion, Linear, or any other tool your team uses. Add servers to your `~/.claude.json` file and Scout picks them up automatically on launch.
+- **Scout can see the whole screen, not just a browser.** A new desktop screenshot tool lets the AI see what's on your screen at any moment — not just what's in the controlled browser window. It can react to what's actually happening.
+- **Scout lives in your system tray.** Even when you close the window, Scout keeps running as long as the agent or monitor is active. Right-click the tray icon to check status, stop a task, or quit.
+- **New global shortcut for the monitor.** `Alt + Shift + M` starts and stops screen monitoring from anywhere on your desktop — no need to open the app.
+- **Scout can now do things for you.** There's an Agent tab. Type what you want done and Claude executes it: terminal commands, file operations, browser automation.
+- **Passwords and API keys are handled safely.** If the AI encounters a credential during a task, it asks before saving anything. You approve every entry before it touches your `.env` file.
+- **Every task becomes a guide.** Whether you record yourself or let the AI do it, Scout turns every session into a reusable Markdown skill file saved to your library.
 
 ---
 
@@ -36,15 +40,31 @@ Scout is an AI-powered desktop agent for teams. It does two things:
 
 ## Features
 
-### Agent Mode (New)
-Scout has a full AI agent powered by Claude that can operate your computer:
+### Agent Mode
+Scout has a full AI agent powered by Claude that operates your computer — in the background, while you keep working:
 
 - **Terminal** — runs any PowerShell command, scripts, git, npm, Python, and more
 - **File system** — reads, writes, creates, and organizes files anywhere on your machine
-- **Browser** — opens URLs, takes screenshots, clicks buttons, fills forms, and scrapes pages using a controlled Electron browser window
-- **Live feed** — every action streams to the UI in real time: what Claude is thinking, what command it ran, what came back
-- **Auto-skill** — every completed agent session is automatically turned into a reusable Markdown skill guide in your Library
-- **Credential detection** — after each session, Claude scans for any API keys, passwords, or tokens it encountered and asks if you want them saved to an encrypted `.env` file
+- **Browser** — opens URLs, takes screenshots, clicks buttons, fills forms, and scrapes pages
+- **Desktop screenshots** — sees your full screen at any moment to react to what's actually on it
+- **MCP servers** — connects to any MCP server in your `~/.claude.json` (GitHub, Slack, Notion, Linear, etc.)
+- **Background execution** — runs in the main process so closing or minimizing the Scout window doesn't stop the task
+- **Live feed** — every action streams to the UI: what Claude is thinking, what ran, what came back
+- **Auto-skill** — every completed session is automatically turned into a Markdown skill guide in your Library
+- **Credential detection** — after each session, Claude scans for API keys or passwords and asks before saving to `.env`
+
+### Screen Monitor (New)
+- Passively watches your desktop — takes a screenshot every 10 seconds
+- Stores the last 30 frames (5 minutes of activity) locally — nothing uploaded unless you choose to act on it
+- Live thumbnail feed visible in the Monitor tab
+- Toggle with `Alt + Shift + M` from anywhere on your desktop
+- Layer voice recording on top at any time to generate a full skill from the captured session
+
+### MCP Integration (New)
+- Reads MCP server config from `~/.claude.json` (same file Claude Code uses — no duplicate setup)
+- Connects to each configured server on launch via the MCP JSON-RPC protocol
+- Exposes all server tools to the agent automatically
+- Shows connected servers and tool counts in the Settings tab
 
 ### Recording
 - Record any screen or window via a live source picker with thumbnail previews
@@ -78,7 +98,10 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 
 ### System Integration
 - Single-instance: only one Scout window ever runs at a time
-- Global shortcut (Alt + Shift + R) works even when the app is minimized or in the background
+- **System tray** — Scout lives in the tray when minimized; right-click for status and controls
+- Global shortcut `Alt + Shift + R` — toggle recording from anywhere
+- Global shortcut `Alt + Shift + M` — toggle screen monitor from anywhere
+- Background persistence — closing the window does not stop an active agent or monitor
 - OS-native Save dialogs for exporting files
 - One-click Windows installer — creates desktop and Start Menu shortcuts, launches automatically after install
 
@@ -90,11 +113,15 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 |---|---|
 | Desktop shell | Electron 35 |
 | AI agent | Claude via Supabase Edge Function (`agent-run`) · SSE streaming · tool use |
-| Agent tools | PowerShell · Node.js fs · Electron BrowserWindow (no extra deps) |
+| Agent execution | Main process (Node.js 22 native `fetch`) — survives window close |
+| Agent tools | PowerShell · Node.js fs · Electron BrowserWindow · desktopCapturer |
+| MCP integration | JSON-RPC over stdio · reads `~/.claude.json` automatically |
+| Screen monitor | `desktopCapturer` at 10s interval · up to 30 frames in memory |
+| System tray | Electron `Tray` + `Menu` · status indicator + quick controls |
 | AI transcription | Gemini Flash (via Supabase Edge Function) |
 | AI skill generation | Claude (via Supabase Edge Function, SSE streaming) |
 | Backend / Auth / Storage | Supabase (Postgres + Storage + Auth) |
-| Credential vault | Encrypted `.env` file · AI-assisted detection |
+| Credential vault | `.env` file · AI-assisted detection · user approval required |
 | Packaging | electron-builder · NSIS installer |
 
 ---

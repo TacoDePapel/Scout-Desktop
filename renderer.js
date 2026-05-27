@@ -401,6 +401,7 @@ function render() {
     case 'processing':        main.appendChild(processingView(view.recording, view.stage, view.error));                  break
     case 'skill':             main.appendChild(skillView(view.recording, view.skill, view.allSkills || []));             break
     case 'agent-running':     main.appendChild(agentRunningView(view.session));                                          break
+    case 'agent-bg-running':  main.appendChild(bgAgentRunningView());                                                    break
     case 'agent-cred-review': main.appendChild(agentCredReviewView(view.session, view.creds));                           break
   }
 
@@ -432,6 +433,7 @@ function bottomNav(active) {
   const tabs = [
     { id: 'record',   label: 'Record',  icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>` },
     { id: 'agent',    label: 'Agent',   icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5" stroke-linecap="round"/></svg>` },
+    { id: 'monitor',  label: 'Monitor', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4" stroke-linecap="round"/></svg>` },
     { id: 'library',  label: 'Library', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>` },
     { id: 'settings', label: 'Account', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7" stroke-linecap="round"/></svg>` },
   ]
@@ -561,9 +563,10 @@ function authView({ step, email }) {
 // ---- Idle ----
 
 function idleView(tab) {
-  if (tab === 'record')  return recordTab()
-  if (tab === 'library') return libraryTab()
-  if (tab === 'agent')   return agentTab()
+  if (tab === 'record')   return recordTab()
+  if (tab === 'agent')    return agentTab()
+  if (tab === 'monitor')  return monitorTab()
+  if (tab === 'library')  return libraryTab()
   return settingsTab()
 }
 
@@ -1148,14 +1151,41 @@ function settingsTab() {
     </div>
 
     <div class="glass" style="padding:16px;">
+      <div class="label" style="font-size:9px;margin-bottom:8px;">MCP SERVERS</div>
+      <div id="mcp-status-list"></div>
+      <p style="font-size:10px;margin-top:8px;line-height:1.5;color:rgba(255,232,199,0.30);">Add servers to <code style="font-family:monospace;font-size:10px;background:rgba(182,128,57,0.10);padding:1px 4px;border-radius:3px;color:#E4AF7A;">~/.claude.json</code> under <code style="font-family:monospace;font-size:10px;background:rgba(182,128,57,0.10);padding:1px 4px;border-radius:3px;color:#E4AF7A;">mcpServers</code> — Scout loads them automatically on startup.</p>
+    </div>
+
+    <div class="glass" style="padding:16px;">
       <div class="label" style="font-size:9px;margin-bottom:4px;">Version</div>
-      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v1.0.0 · Orage AI Agency · Desktop</div>
+      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.0.0 · Orage AI Agency · Desktop</div>
     </div>
   `
 
   d.querySelector('#signout-btn').onclick = doSignOut
   d.querySelector('#export-btn').onclick  = exportAllSkills
+
+  const mcpListEl = d.querySelector('#mcp-status-list')
+  renderMCPStatus(mcpListEl)
   return d
+}
+
+function renderMCPStatus(el) {
+  if (!el) return
+  const entries = Object.entries(mcpStatus)
+  if (!entries.length) {
+    el.innerHTML = `<div style="font-size:11px;color:rgba(255,232,199,0.30);">No MCP servers connected.</div>`
+    return
+  }
+  el.innerHTML = entries.map(([name, info]) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(182,128,57,0.08);">
+      <div style="display:flex;align-items:center;gap:7px;">
+        <div style="width:6px;height:6px;border-radius:50%;background:#4ADE80;flex-shrink:0;"></div>
+        <span style="font-size:12px;color:#FFE8C7;">${escapeHtml(name)}</span>
+      </div>
+      <span style="font-size:10px;color:rgba(255,232,199,0.35);">${info.tools.length} tool${info.tools.length !== 1 ? 's' : ''}</span>
+    </div>
+  `).join('')
 }
 
 // ---- Skill view ----
@@ -1770,22 +1800,151 @@ async function generateSkillFromAgentSession() {
   }
 }
 
+// ---- Background agent state mirror (populated by main-process events) ----
+
+let bgAgentSteps   = []
+let bgAgentRunning = false
+let bgAgentTask    = ''
+let mcpStatus      = {}
+let monitorActive  = false
+let latestFrame    = null
+
+function initMainProcessListeners() {
+  window.electronAPI.onAgentUpdate(data => {
+    if (data.type === 'start') {
+      bgAgentRunning = true; bgAgentTask = data.task; bgAgentSteps = []
+      if (view.kind === 'agent-bg-running') updateBgAgentView()
+    } else if (data.type === 'text') {
+      bgAgentSteps.push({ type: 'text', text: data.text })
+      if (view.kind === 'agent-bg-running') updateBgAgentView()
+    } else if (data.type === 'text-delta') {
+      const el = document.getElementById('agent-stream-text')
+      if (el) el.textContent = data.text
+    } else if (data.type === 'tool-call') {
+      bgAgentSteps.push({ type: 'tool-call', tool: data.tool, input: data.input, id: data.id })
+      if (view.kind === 'agent-bg-running') updateBgAgentView()
+    } else if (data.type === 'tool-result') {
+      bgAgentSteps.push({ type: 'tool-result', tool: data.tool, result: data.result, id: data.id })
+      if (view.kind === 'agent-bg-running') updateBgAgentView()
+    } else if (data.type === 'error') {
+      bgAgentSteps.push({ type: 'error', text: data.text })
+      if (view.kind === 'agent-bg-running') updateBgAgentView()
+    } else if (data.type === 'done') {
+      bgAgentRunning = false
+      if (view.kind === 'agent-bg-running') {
+        const doneBar = document.getElementById('agent-done-bar')
+        if (doneBar) doneBar.style.display = 'flex'
+        const statusEl = document.getElementById('agent-bg-status')
+        if (statusEl) statusEl.innerHTML = `<div style="width:6px;height:6px;border-radius:50%;background:rgba(255,232,199,0.28);flex-shrink:0;"></div><span style="font-size:10px;color:rgba(255,232,199,0.45);">Completed in ${Math.round((data.elapsed||0)/1000)}s</span>`
+      }
+      void generateSkillFromBgSession()
+    }
+  })
+
+  window.electronAPI.onMonitorFrame(data => {
+    latestFrame = data
+    const img = document.getElementById('monitor-live-img')
+    if (img) { img.src = data.dataUrl; img.style.display = 'block' }
+    const ct  = document.getElementById('monitor-frame-count')
+    if (ct) ct.textContent = `${data.total} frame${data.total !== 1 ? 's' : ''} captured`
+  })
+
+  window.electronAPI.onMonitorStatus(data => {
+    monitorActive = data.active
+    const btn = document.getElementById('monitor-toggle-btn')
+    if (btn) { btn.textContent = monitorActive ? 'Stop Monitor' : 'Start Monitor'; btn.className = monitorActive ? 'btn' : 'btn btn-primary' }
+    const dot = document.getElementById('monitor-status-dot')
+    if (dot) dot.style.background = monitorActive ? '#4ADE80' : 'rgba(255,232,199,0.20)'
+  })
+
+  window.electronAPI.onMCPReady(data => {
+    mcpStatus = data
+    const el = document.getElementById('mcp-status-list')
+    if (el) renderMCPStatus(el)
+  })
+}
+
+async function generateSkillFromBgSession() {
+  if (!bgAgentSteps.length || !supabase || !currentUser) return
+  const transcript = bgAgentSteps
+    .filter(s => s.type === 'text')
+    .map(s => s.text)
+    .join('\n\n')
+    .slice(0, 12000)
+  if (!transcript.trim()) return
+
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return
+
+  const recId = crypto.randomUUID()
+  try {
+    await supabase.from('recordings').insert({
+      id: recId, user_id: currentUser.id,
+      title: bgAgentTask.slice(0, 120),
+      status: 'drafting',
+      started_at: new Date().toISOString(), ended_at: new Date().toISOString(),
+      duration_ms: 0, mode: 'skill',
+      transcript: { segments: [{ text: transcript }] },
+      meta: { source: 'bg-agent', platform: window.electronAPI.platform },
+    })
+    view = { kind: 'processing', recording: { id: recId, title: bgAgentTask.slice(0, 120), mode: 'skill', duration_ms: 0 }, stage: 'drafting', error: null }
+    render()
+
+    const skillRes = await fetch(`${SUPABASE_URL}/functions/v1/generate-skill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ recording_id: recId, extra_context: 'Generated from background agent session.' }),
+    })
+    if (!skillRes.ok) { view = { kind: 'idle', tab: 'library' }; render(); return }
+
+    let finalSkill = null
+    const reader = skillRes.body.getReader(); const dec = new TextDecoder(); let buf = '', liveText = ''
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n'); buf = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim(); if (raw === '[DONE]') break
+        try { const ev = JSON.parse(raw); if (ev.type === 'chunk') { liveText += ev.text; const lv = document.getElementById('live-skill-text'); if (lv) lv.textContent = liveText } if (ev.type === 'done') finalSkill = ev.skill } catch {}
+      }
+    }
+    if (!finalSkill) { view = { kind: 'idle', tab: 'library' }; render(); return }
+    const { data: rData } = await supabase.from('recordings').select('*, skills(*)').eq('id', recId).single()
+    const skillObj = rData?.skills?.[0] ?? finalSkill
+    view = { kind: 'skill', recording: rData ?? { id: recId, title: bgAgentTask, mode: 'skill' }, skill: skillObj, allSkills: rData?.skills ?? [skillObj] }
+    render()
+  } catch (e) { console.error('Bg agent skill gen failed:', e); view = { kind: 'idle', tab: 'library' }; render() }
+}
+
 // ---- Agent tab ----
 
 function agentTab() {
   const d = document.createElement('div')
   d.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:16px;'
 
+  // MCP pill row
+  const mcpCount   = Object.keys(mcpStatus).length
+  const mcpPill    = mcpCount
+    ? `<span style="font-size:9px;background:rgba(74,222,128,0.12);color:#4ADE80;border:1px solid rgba(74,222,128,0.25);border-radius:4px;padding:2px 7px;font-family:'Bebas Neue',sans-serif;letter-spacing:0.1em;">${mcpCount} MCP</span>`
+    : ''
+
   d.innerHTML = `
     <div class="glass" style="padding:20px;display:flex;flex-direction:column;gap:14px;">
-      <div>
-        <div class="display" style="font-size:18px;color:#E4AF7A;">Run Agent</div>
-        <p style="font-size:11px;line-height:1.65;margin-top:6px;color:rgba(255,232,199,0.45);">Describe what you want done. Claude will execute it on your computer — terminal, files, browser, and more.</p>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+        <div>
+          <div class="display" style="font-size:18px;color:#E4AF7A;">Run Agent</div>
+          <p style="font-size:11px;line-height:1.65;margin-top:5px;color:rgba(255,232,199,0.45);">Describe a task. Claude executes it in the background — you can keep using your computer while it runs.</p>
+        </div>
+        ${mcpPill}
       </div>
       <textarea id="agent-task" class="input" rows="5"
-        placeholder="e.g. Go to github.com/TacoDePapel/Scout-Desktop and tell me the latest release details.&#10;&#10;Or: Create a new folder on my Desktop called Projects and add a README.md with a project template."
+        placeholder="e.g. Go to our GitHub repo and summarise the last 5 commits.&#10;&#10;Or: Create a Projects folder on my Desktop with a README template inside."
         style="resize:vertical;min-height:100px;font-size:12px;line-height:1.65;"></textarea>
-      <button id="agent-run" class="btn btn-primary" style="width:100%;font-size:13px;padding:10px;">Run →</button>
+      <div style="display:flex;gap:8px;">
+        <button id="agent-run-bg" class="btn btn-primary" style="flex:1;font-size:13px;padding:10px;">Run in Background →</button>
+      </div>
     </div>
 
     <div class="glass" style="padding:16px;border-color:rgba(182,128,57,0.15);">
@@ -1794,26 +1953,194 @@ function agentTab() {
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">⌨</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Run any PowerShell command on your machine</span></div>
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📂</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Read and write files anywhere on your computer</span></div>
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🌐</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Open URLs, click, type, and scrape web pages</span></div>
-        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📝</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Turns every completed task into a reusable skill guide</span></div>
+        ${mcpCount ? `<div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🔌</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">${mcpCount} MCP server${mcpCount !== 1 ? 's' : ''} connected (${Object.keys(mcpStatus).join(', ')})</span></div>` : ''}
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📝</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Every completed task becomes a reusable skill guide automatically</span></div>
       </div>
     </div>
   `
 
-  d.querySelector('#agent-run').onclick = () => {
+  const runBg = async () => {
     const task = d.querySelector('#agent-task').value.trim()
     if (!task) return
-    void runAgent(task)
+    if (!supabase || !currentUser) return
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData?.session?.access_token
+    if (!token) return
+    const { error } = await window.electronAPI.startAgentBg({ task, token })
+    if (error) { alert(error); return }
+    bgAgentSteps = []; bgAgentTask = task; bgAgentRunning = true
+    view = { kind: 'agent-bg-running' }
+    render()
   }
-  d.querySelector('#agent-task').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      const task = d.querySelector('#agent-task').value.trim()
-      if (task) void runAgent(task)
-    }
-  })
+
+  d.querySelector('#agent-run-bg').onclick = runBg
+  d.querySelector('#agent-task').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void runBg() })
   return d
 }
 
-// ---- Agent running view ----
+// ---- Background agent running view ----
+
+function updateBgAgentView() {
+  const feed = document.getElementById('agent-feed')
+  if (!feed) return
+  feed.innerHTML = ''
+  for (const step of bgAgentSteps) {
+    const el = document.createElement('div')
+    if (step.type === 'text') {
+      el.style.cssText = 'font-size:12px;line-height:1.65;color:rgba(255,232,199,0.75);padding:8px 0;white-space:pre-wrap;'
+      el.textContent = step.text
+    } else if (step.type === 'tool-call') {
+      el.className = 'glass'
+      el.style.cssText = 'padding:10px 12px;border-left:2px solid rgba(182,128,57,0.55);'
+      el.innerHTML = `<div style="font-size:10px;font-family:'Bebas Neue',sans-serif;letter-spacing:0.12em;color:#E4AF7A;margin-bottom:4px;">${toolIcon(step.tool)} ${step.tool}</div><div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:rgba(255,232,199,0.50);white-space:pre-wrap;word-break:break-all;">${escapeHtml(summarizeToolInput(step.tool, step.input))}</div>`
+    } else if (step.type === 'tool-result') {
+      const ok = !step.result?.error
+      el.style.cssText = `font-size:10px;font-family:'JetBrains Mono',monospace;color:${ok ? 'rgba(74,222,128,0.65)' : '#F87171'};padding:4px 0 8px;white-space:pre-wrap;word-break:break-all;max-height:80px;overflow:hidden;`
+      el.textContent = step.result?.error ? `✗ ${step.result.error}` : formatToolResult(step.tool, step.result)
+    } else if (step.type === 'error') {
+      el.style.cssText = 'font-size:11px;color:#F87171;padding:8px 0;'
+      el.textContent = step.text
+    }
+    feed.appendChild(el)
+  }
+  feed.scrollTop = feed.scrollHeight
+}
+
+function bgAgentRunningView() {
+  const d = document.createElement('div')
+  d.style.cssText = 'padding:16px 20px;display:flex;flex-direction:column;gap:12px;'
+
+  const header = document.createElement('div')
+  header.className = 'glass'
+  header.style.cssText = 'padding:16px;'
+  header.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
+      <div class="display" style="font-size:16px;color:#E4AF7A;line-height:1.3;flex:1;">${escapeHtml((bgAgentTask || '').slice(0, 80))}${bgAgentTask.length > 80 ? '…' : ''}</div>
+      <button id="agent-stop-btn" class="btn" style="font-size:11px;padding:5px 10px;flex-shrink:0;color:#F87171;border-color:rgba(248,113,113,0.3);">Stop</button>
+    </div>
+    <div id="agent-bg-status" style="display:flex;align-items:center;gap:6px;">
+      <div style="width:6px;height:6px;border-radius:50%;background:#4ADE80;animation:pulse-dot-green 1.2s ease infinite;flex-shrink:0;"></div>
+      <span style="font-size:10px;color:rgba(255,232,199,0.45);">Running in background — you can keep using your computer</span>
+    </div>
+  `
+  header.querySelector('#agent-stop-btn').onclick = async () => {
+    await window.electronAPI.stopAgentBg()
+    bgAgentRunning = false
+    view = { kind: 'idle', tab: 'agent' }; render()
+  }
+  d.appendChild(header)
+
+  const feedWrap = document.createElement('div')
+  feedWrap.className = 'glass'
+  feedWrap.style.cssText = 'padding:14px 16px;min-height:280px;max-height:440px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;'
+  const streamText = document.createElement('div')
+  streamText.id = 'agent-stream-text'
+  streamText.style.cssText = 'font-size:12px;line-height:1.65;color:rgba(255,232,199,0.55);white-space:pre-wrap;font-style:italic;'
+  const feed = document.createElement('div')
+  feed.id = 'agent-feed'
+  feed.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+  feedWrap.appendChild(streamText); feedWrap.appendChild(feed)
+  d.appendChild(feedWrap)
+
+  const doneBar = document.createElement('div')
+  doneBar.id = 'agent-done-bar'
+  doneBar.style.cssText = 'display:none;gap:8px;'
+  doneBar.innerHTML = `
+    <button id="agent-view-skill" class="btn btn-primary" style="flex:1;font-size:12px;">View Skill →</button>
+    <button id="agent-new-task"   class="btn"             style="flex:1;font-size:12px;">New Task</button>
+  `
+  doneBar.querySelector('#agent-view-skill').onclick = () => { view = { kind: 'idle', tab: 'library' }; render() }
+  doneBar.querySelector('#agent-new-task').onclick   = () => { view = { kind: 'idle', tab: 'agent' };   render() }
+  d.appendChild(doneBar)
+
+  setTimeout(() => updateBgAgentView(), 0)
+  return d
+}
+
+// ---- Monitor tab ----
+
+function monitorTab() {
+  const d = document.createElement('div')
+  d.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:16px;'
+
+  d.innerHTML = `
+    <div class="glass" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div class="display" style="font-size:18px;color:#E4AF7A;">Screen Monitor</div>
+          <p style="font-size:11px;margin-top:5px;line-height:1.65;color:rgba(255,232,199,0.45);">Scout watches your screen in the background and captures what you do — ready to turn any session into a skill.</p>
+        </div>
+        <div id="monitor-status-dot" style="width:10px;height:10px;border-radius:50%;background:rgba(255,232,199,0.20);flex-shrink:0;margin-top:2px;transition:background 0.3s;"></div>
+      </div>
+      <button id="monitor-toggle-btn" class="btn btn-primary" style="width:100%;font-size:13px;padding:10px;">Start Monitor</button>
+      <p style="font-size:10px;color:rgba(255,232,199,0.30);line-height:1.5;">Shortcut: <span style="font-family:'JetBrains Mono',monospace;background:rgba(182,128,57,0.12);padding:1px 5px;border-radius:3px;color:#E4AF7A;">Alt+Shift+M</span> from anywhere</p>
+    </div>
+
+    <div class="glass" style="padding:14px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="label" style="font-size:9px;">LIVE VIEW</div>
+        <span id="monitor-frame-count" style="font-size:9px;color:rgba(255,232,199,0.28);">No frames yet</span>
+      </div>
+      <img id="monitor-live-img" style="display:none;width:100%;border-radius:6px;object-fit:cover;" />
+      <div id="monitor-placeholder" style="height:120px;border-radius:6px;background:rgba(0,0,0,0.35);border:1px dashed rgba(182,128,57,0.18);display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:11px;color:rgba(255,232,199,0.25);">Start monitor to see live feed</span>
+      </div>
+    </div>
+
+    <div class="glass" style="padding:14px;border-color:rgba(182,128,57,0.15);">
+      <div class="label" style="font-size:9px;margin-bottom:8px;">HOW IT WORKS</div>
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📸</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.50);">Takes a screenshot every 10 seconds — stores the last 30 (5 minutes of activity)</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🔒</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.50);">Frames stay on your machine — nothing is uploaded unless you choose to generate a skill</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">✨</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.50);">Hit Record at any time to layer voice on top and build a full skill from the session</span></div>
+      </div>
+    </div>
+  `
+
+  const toggleBtn = d.querySelector('#monitor-toggle-btn')
+  const statusDot = d.querySelector('#monitor-status-dot')
+  const liveImg   = d.querySelector('#monitor-live-img')
+  const placeholder = d.querySelector('#monitor-placeholder')
+
+  void window.electronAPI.getMonitorStatus().then(s => {
+    monitorActive = s.active
+    toggleBtn.textContent  = monitorActive ? 'Stop Monitor' : 'Start Monitor'
+    toggleBtn.className    = monitorActive ? 'btn' : 'btn btn-primary'
+    statusDot.style.background = monitorActive ? '#4ADE80' : 'rgba(255,232,199,0.20)'
+    if (s.active && s.frameCount > 0) {
+      void window.electronAPI.getMonitorFrames().then(frames => {
+        if (frames.length) {
+          liveImg.src = frames[frames.length - 1].dataUrl
+          liveImg.style.display = 'block'
+          placeholder.style.display = 'none'
+          d.querySelector('#monitor-frame-count').textContent = `${frames.length} frame${frames.length !== 1 ? 's' : ''} captured`
+        }
+      })
+    }
+  })
+
+  toggleBtn.onclick = async () => {
+    const next = !monitorActive
+    await window.electronAPI.toggleMonitor({ active: next })
+    monitorActive = next
+    toggleBtn.textContent = next ? 'Stop Monitor' : 'Start Monitor'
+    toggleBtn.className   = next ? 'btn' : 'btn btn-primary'
+    statusDot.style.background = next ? '#4ADE80' : 'rgba(255,232,199,0.20)'
+    if (!next) { liveImg.style.display = 'none'; placeholder.style.display = 'flex' }
+  }
+
+  // Live frame updates while this tab is visible
+  window.electronAPI.onMonitorFrame(data => {
+    liveImg.src = data.dataUrl
+    liveImg.style.display = 'block'
+    placeholder.style.display = 'none'
+    d.querySelector('#monitor-frame-count').textContent = `${data.total} frame${data.total !== 1 ? 's' : ''} captured`
+  })
+
+  return d
+}
+
+// ---- Agent running view (renderer-side / legacy) ----
 
 function agentRunningView(session) {
   const d = document.createElement('div')
@@ -1961,6 +2288,16 @@ void (async () => {
 
   view = currentUser ? { kind: 'idle', tab: 'record' } : { kind: 'auth', step: 'email', email: '' }
   render()
+
+  // Subscribe to main-process events (agent updates, monitor frames, MCP ready)
+  initMainProcessListeners()
+
+  // Load initial state from main process
+  window.electronAPI.getMCPStatus().then(s => { mcpStatus = s })
+  window.electronAPI.getMonitorStatus().then(s => { monitorActive = s.active })
+  window.electronAPI.getAgentState().then(s => {
+    if (s.running) { bgAgentRunning = true; bgAgentTask = s.task; view = { kind: 'agent-bg-running' }; render() }
+  })
 
   // Global hotkey — toggles recording from anywhere on the desktop
   window.electronAPI.onHotkeyRecord(() => {
