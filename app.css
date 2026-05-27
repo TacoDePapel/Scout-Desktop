@@ -468,6 +468,10 @@ textarea.input {
   0%, 100% { opacity: 1;    box-shadow: 0 0 0 0  rgba(220,38,38,0.55); }
   50%       { opacity: 0.45; box-shadow: 0 0 0 7px rgba(220,38,38,0); }
 }
+@keyframes pulse-dot-green {
+  0%, 100% { opacity: 1;    box-shadow: 0 0 0 0  rgba(74,222,128,0.55); }
+  50%       { opacity: 0.55; box-shadow: 0 0 0 6px rgba(74,222,128,0); }
+}
 @keyframes scout-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }

@@ -1,7 +1,7 @@
 # Scout Desktop
 
-> **Record your screen. Get an AI-written skill guide. Done.**
-> No setup, no passwords, no configuration — open the app, type your email, and start recording.
+> **Your AI teammate that lives on your computer.**
+> Record what you do and Scout turns it into a skill guide — or just tell Scout what you want done and it handles it for you.
 
 ---
 
@@ -16,7 +16,24 @@ Windows 10/11 · x64
 
 ## What Scout Does
 
-Scout is an AI-powered workflow capture tool for teams. You record yourself doing something on your computer — the app captures your screen and mic audio — and Scout automatically generates a clean, structured skill guide in Markdown.
+Scout is an AI-powered desktop agent for teams. It does two things:
+
+1. **Record yourself doing a task** → Scout captures your screen and voice, then writes a clean step-by-step skill guide your AI can follow later.
+2. **Tell Scout what you want done** → Scout's built-in Claude agent executes the task on your computer autonomously — terminal, files, browser, APIs — and turns the session into a skill automatically.
+
+---
+
+## Features
+
+### Agent Mode (New)
+Scout has a full AI agent powered by Claude that can operate your computer:
+
+- **Terminal** — runs any PowerShell command, scripts, git, npm, Python, and more
+- **File system** — reads, writes, creates, and organizes files anywhere on your machine
+- **Browser** — opens URLs, takes screenshots, clicks buttons, fills forms, and scrapes pages using a controlled Electron browser window
+- **Live feed** — every action streams to the UI in real time: what Claude is thinking, what command it ran, what came back
+- **Auto-skill** — every completed agent session is automatically turned into a reusable Markdown skill guide in your Library
+- **Credential detection** — after each session, Claude scans for any API keys, passwords, or tokens it encountered and asks if you want them saved to an encrypted `.env` file
 
 ### Recording
 - Record any screen or window via a live source picker with thumbnail previews
@@ -33,7 +50,7 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 3. **Draft** — Claude generates a formatted Markdown skill guide, streamed live so you see it appear word by word
 
 ### Skill Library
-- Every generated skill is saved to your personal library
+- Every generated skill — from recordings and agent sessions — is saved to your personal library
 - Browse and re-read past skills from the Library tab
 - Download any individual skill as a `.md` file
 - Export all skills at once as a `.zip` archive
@@ -61,9 +78,12 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 | Layer | Technology |
 |---|---|
 | Desktop shell | Electron 35 |
+| AI agent | Claude via Supabase Edge Function (`agent-run`) · SSE streaming · tool use |
+| Agent tools | PowerShell · Node.js fs · Electron BrowserWindow (no extra deps) |
 | AI transcription | Gemini Flash (via Supabase Edge Function) |
 | AI skill generation | Claude (via Supabase Edge Function, SSE streaming) |
 | Backend / Auth / Storage | Supabase (Postgres + Storage + Auth) |
+| Credential vault | Encrypted `.env` file · AI-assisted detection |
 | Packaging | electron-builder · NSIS installer |
 
 ---
@@ -77,6 +97,21 @@ npm run dist       # build installer → dist/Scout Setup x.x.x.exe
 ```
 
 Requires Node.js 18+ and Windows (for the installer target).
+
+### Deploying the Agent Edge Function
+
+The agent requires a Supabase edge function and an Anthropic API key:
+
+```bash
+# 1. Login to Supabase CLI
+npx supabase login
+
+# 2. Deploy the function
+npx supabase functions deploy agent-run --project-ref wmicxsafqbixedpjhchc --no-verify-jwt
+
+# 3. Set the Anthropic API key secret in Supabase dashboard:
+#    Edge Functions → Secrets → Add → ANTHROPIC_API_KEY
+```
 
 ---
 

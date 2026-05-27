@@ -395,11 +395,13 @@ function render() {
   main.style.cssText = 'flex:1;overflow-y:auto;'
 
   switch (view.kind) {
-    case 'idle':          main.appendChild(idleView(view.tab));                                                break
-    case 'recording':     main.appendChild(recordingView(view.state));                                         break
-    case 'extra_context': main.appendChild(extraContextView(view.recording));                                  break
-    case 'processing':    main.appendChild(processingView(view.recording, view.stage, view.error));            break
-    case 'skill':         main.appendChild(skillView(view.recording, view.skill, view.allSkills || []));       break
+    case 'idle':              main.appendChild(idleView(view.tab));                                                      break
+    case 'recording':         main.appendChild(recordingView(view.state));                                               break
+    case 'extra_context':     main.appendChild(extraContextView(view.recording));                                        break
+    case 'processing':        main.appendChild(processingView(view.recording, view.stage, view.error));                  break
+    case 'skill':             main.appendChild(skillView(view.recording, view.skill, view.allSkills || []));             break
+    case 'agent-running':     main.appendChild(agentRunningView(view.session));                                          break
+    case 'agent-cred-review': main.appendChild(agentCredReviewView(view.session, view.creds));                           break
   }
 
   wrap.appendChild(main)
@@ -429,6 +431,7 @@ function bottomNav(active) {
   nav.style.cssText = 'display:flex;border-top:1px solid rgba(182,128,57,0.12);background:linear-gradient(0deg,rgba(0,0,0,0.85) 0%,rgba(12,12,12,0.70) 100%);backdrop-filter:blur(20px);flex-shrink:0;'
   const tabs = [
     { id: 'record',   label: 'Record',  icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>` },
+    { id: 'agent',    label: 'Agent',   icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5" stroke-linecap="round"/></svg>` },
     { id: 'library',  label: 'Library', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>` },
     { id: 'settings', label: 'Account', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7" stroke-linecap="round"/></svg>` },
   ]
@@ -560,6 +563,7 @@ function authView({ step, email }) {
 function idleView(tab) {
   if (tab === 'record')  return recordTab()
   if (tab === 'library') return libraryTab()
+  if (tab === 'agent')   return agentTab()
   return settingsTab()
 }
 
@@ -1316,6 +1320,629 @@ function skillQualityScore(rec, skill) {
   if (score >= 65) return { score, label: 'Strong',    color: '#E4AF7A' }
   if (score >= 40) return { score, label: 'Good',      color: 'rgba(255,232,199,0.65)' }
   return              { score, label: 'Minimal',        color: 'rgba(255,232,199,0.35)' }
+}
+
+// ---- Agent ----
+
+const AGENT_TOOLS = [
+  {
+    name: 'bash',
+    description: 'Run a PowerShell command on the user\'s Windows computer. Use for file ops, running scripts, git, npm, Python, reading registry, etc. Stdout and stderr are returned.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'PowerShell command to execute' },
+        cwd:     { type: 'string', description: 'Working directory (optional, defaults to home)' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'read_file',
+    description: 'Read the full text contents of a file on the user\'s computer.',
+    input_schema: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Absolute file path' } },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'write_file',
+    description: 'Write or overwrite a file on the user\'s computer with the given content. Creates parent directories if needed.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path:    { type: 'string', description: 'Absolute file path' },
+        content: { type: 'string', description: 'Text content to write' },
+      },
+      required: ['path', 'content'],
+    },
+  },
+  {
+    name: 'list_dir',
+    description: 'List files and folders inside a directory.',
+    input_schema: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Absolute directory path' } },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'browser_open',
+    description: 'Open a URL in a controlled browser window. You can then use browser_action to interact with it.',
+    input_schema: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Full URL to open (include https://)' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_action',
+    description: 'Interact with the currently open browser window. Always start with a screenshot to see the current state.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['screenshot', 'get_text', 'get_url', 'navigate', 'click', 'type', 'wait', 'eval'],
+          description: 'screenshot=capture page image, get_text=page text, navigate=go to URL, click=click element, type=fill input, wait=pause ms, eval=run JS',
+        },
+        selector: { type: 'string', description: 'CSS selector for click/type' },
+        text:     { type: 'string', description: 'URL for navigate, text to type, or ms to wait' },
+        script:   { type: 'string', description: 'JavaScript code for eval action' },
+      },
+      required: ['action'],
+    },
+  },
+]
+
+const AGENT_SYSTEM = `You are an AI agent embedded in Scout Desktop, running on a Windows 11 computer. You help users automate tasks by executing commands, reading/writing files, and controlling a browser.
+
+Guidelines:
+- Be precise and efficient. Plan your approach, then execute.
+- After browser_open, always take a screenshot first to understand the page state.
+- Use PowerShell-compatible syntax in bash commands.
+- When you write files, confirm the path and content before writing.
+- If you encounter an error, explain it clearly and try an alternative approach.
+- When the task is complete, summarize what you did concisely.`
+
+let agentSession = null
+
+async function runAgent(task) {
+  if (!supabase || !currentUser) return
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return
+
+  agentSession = {
+    task,
+    messages: [{ role: 'user', content: task }],
+    steps: [],
+    stopped: false,
+    startedAt: Date.now(),
+  }
+
+  view = { kind: 'agent-running', session: agentSession }
+  render()
+
+  const MAX_ITERATIONS = 30
+  let iteration = 0
+
+  while (iteration < MAX_ITERATIONS && !agentSession.stopped) {
+    iteration++
+
+    let assistantContent = []
+    let currentToolUse = null
+    let currentText = ''
+    let buffer = ''
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/agent-run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          messages: agentSession.messages,
+          tools: AGENT_TOOLS,
+          system: AGENT_SYSTEM,
+        }),
+      })
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.status)
+        agentSession.steps.push({ type: 'error', text: `Agent error (${res.status}): ${errText}` })
+        updateAgentView()
+        break
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+
+      while (!agentSession.stopped) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (raw === '[DONE]') break
+          let event
+          try { event = JSON.parse(raw) } catch { continue }
+
+          if (event.type === 'content_block_start') {
+            if (event.content_block?.type === 'tool_use') {
+              currentToolUse = { id: event.content_block.id, name: event.content_block.name, inputRaw: '' }
+            }
+          } else if (event.type === 'content_block_delta') {
+            if (event.delta?.type === 'text_delta') {
+              currentText += event.delta.text
+              updateAgentStreamText(currentText)
+            } else if (event.delta?.type === 'input_json_delta' && currentToolUse) {
+              currentToolUse.inputRaw += event.delta.partial_json
+            }
+          } else if (event.type === 'content_block_stop') {
+            if (currentToolUse) {
+              try { currentToolUse.input = JSON.parse(currentToolUse.inputRaw || '{}') } catch { currentToolUse.input = {} }
+              assistantContent.push({ type: 'tool_use', id: currentToolUse.id, name: currentToolUse.name, input: currentToolUse.input })
+              currentToolUse = null
+            } else if (currentText) {
+              assistantContent.push({ type: 'text', text: currentText })
+              agentSession.steps.push({ type: 'text', text: currentText })
+              updateAgentView()
+              currentText = ''
+            }
+          } else if (event.type === 'message_stop') {
+            break
+          }
+        }
+      }
+    } catch (e) {
+      agentSession.steps.push({ type: 'error', text: 'Network error: ' + e.message })
+      updateAgentView()
+      break
+    }
+
+    if (!assistantContent.length) break
+    agentSession.messages.push({ role: 'assistant', content: assistantContent })
+
+    const toolCalls = assistantContent.filter(b => b.type === 'tool_use')
+    if (!toolCalls.length) break
+
+    const toolResults = []
+    for (const tc of toolCalls) {
+      if (agentSession.stopped) break
+      agentSession.steps.push({ type: 'tool-call', tool: tc.name, input: tc.input, id: tc.id })
+      updateAgentView()
+
+      const result = await executeAgentTool(tc.name, tc.input)
+
+      agentSession.steps.push({ type: 'tool-result', tool: tc.name, result, id: tc.id })
+      updateAgentView()
+
+      const resultText = typeof result === 'object'
+        ? (result.error ? `Error: ${result.error}` : JSON.stringify(result, null, 2))
+        : String(result)
+
+      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: resultText.slice(0, 20000) })
+    }
+
+    if (toolResults.length) {
+      agentSession.messages.push({ role: 'user', content: toolResults })
+    }
+  }
+
+  if (!agentSession.stopped) {
+    agentSession.stopped = true
+    agentSession.done = true
+    agentSession.elapsed = Date.now() - agentSession.startedAt
+    updateAgentView()
+    void detectAndOfferCredentials()
+    void generateSkillFromAgentSession()
+  }
+}
+
+async function executeAgentTool(name, input) {
+  switch (name) {
+    case 'bash':          return window.electronAPI.agentBash(input)
+    case 'read_file':     return window.electronAPI.agentReadFile(input)
+    case 'write_file':    return window.electronAPI.agentWriteFile(input)
+    case 'list_dir':      return window.electronAPI.agentListDir(input)
+    case 'browser_open':  return window.electronAPI.agentBrowserOpen(input)
+    case 'browser_action': return window.electronAPI.agentBrowserAction(input)
+    default: return { error: `Unknown tool: ${name}` }
+  }
+}
+
+function updateAgentStreamText(text) {
+  const el = document.getElementById('agent-stream-text')
+  if (el) el.textContent = text
+}
+
+function updateAgentView() {
+  const feed = document.getElementById('agent-feed')
+  if (!feed || !agentSession) return
+
+  feed.innerHTML = ''
+  for (const step of agentSession.steps) {
+    const el = document.createElement('div')
+    if (step.type === 'text') {
+      el.style.cssText = 'font-size:12px;line-height:1.65;color:rgba(255,232,199,0.75);padding:8px 0;white-space:pre-wrap;'
+      el.textContent = step.text
+    } else if (step.type === 'tool-call') {
+      el.className = 'glass'
+      el.style.cssText = 'padding:10px 12px;border-left:2px solid rgba(182,128,57,0.55);'
+      const inputSummary = summarizeToolInput(step.tool, step.input)
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <span style="font-size:10px;font-family:'Bebas Neue',sans-serif;letter-spacing:0.12em;color:#E4AF7A;">${toolIcon(step.tool)} ${step.tool}</span>
+        </div>
+        <div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:rgba(255,232,199,0.50);white-space:pre-wrap;word-break:break-all;">${escapeHtml(inputSummary)}</div>
+      `
+    } else if (step.type === 'tool-result') {
+      const res = step.result
+      const ok = !res?.error
+      el.style.cssText = `font-size:10px;font-family:'JetBrains Mono',monospace;color:${ok ? 'rgba(74,222,128,0.65)' : '#F87171'};padding:4px 0 8px;white-space:pre-wrap;word-break:break-all;max-height:80px;overflow:hidden;`
+      const text = res?.error ? `✗ ${res.error}` : formatToolResult(step.tool, res)
+      el.textContent = text
+    } else if (step.type === 'error') {
+      el.style.cssText = 'font-size:11px;color:#F87171;padding:8px 0;'
+      el.textContent = step.text
+    }
+    feed.appendChild(el)
+  }
+
+  feed.scrollTop = feed.scrollHeight
+  const doneBar = document.getElementById('agent-done-bar')
+  if (doneBar && agentSession.done) doneBar.style.display = 'flex'
+}
+
+function summarizeToolInput(tool, input) {
+  if (tool === 'bash') return input.command || ''
+  if (tool === 'read_file') return input.path || ''
+  if (tool === 'write_file') return `${input.path}\n${(input.content || '').slice(0, 120)}${input.content?.length > 120 ? '…' : ''}`
+  if (tool === 'list_dir') return input.path || ''
+  if (tool === 'browser_open') return input.url || ''
+  if (tool === 'browser_action') return `${input.action}${input.selector ? ' ' + input.selector : ''}${input.text ? ' → ' + input.text : ''}`
+  return JSON.stringify(input)
+}
+
+function formatToolResult(tool, res) {
+  if (!res) return ''
+  if (tool === 'bash') {
+    const out = [res.stdout, res.stderr].filter(Boolean).join('\n').trim()
+    return (out || '(no output)').slice(0, 200)
+  }
+  if (tool === 'read_file') return `✓ ${res.content?.length ?? 0} chars`
+  if (tool === 'write_file') return res.success ? '✓ written' : `✗ ${res.error}`
+  if (tool === 'list_dir') return res.entries ? `✓ ${res.entries.length} items` : `✗ ${res.error}`
+  if (tool === 'browser_open') return res.success ? `✓ ${res.url}` : `✗ ${res.error}`
+  if (tool === 'browser_action') {
+    if (res.dataUrl) return '✓ screenshot captured'
+    if (res.url) return `✓ ${res.url}`
+    if (res.text) return `✓ text: ${res.text.slice(0, 80)}`
+    return res.success ? '✓' : `✗ ${res.error || ''}`
+  }
+  return '✓'
+}
+
+function toolIcon(tool) {
+  return { bash: '>', read_file: 'R', write_file: 'W', list_dir: 'L', browser_open: 'B', browser_action: 'B' }[tool] || '·'
+}
+
+async function detectAndOfferCredentials() {
+  if (!agentSession?.messages?.length) return
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return
+
+  const transcript = agentSession.messages
+    .filter(m => m.role === 'assistant')
+    .flatMap(m => Array.isArray(m.content) ? m.content.filter(b => b.type === 'text').map(b => b.text) : [m.content])
+    .join('\n')
+    .slice(0, 8000)
+
+  if (!transcript.trim()) return
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/agent-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        tools: [],
+        system: 'You extract credentials from text. Return ONLY a JSON array like [{"key":"ENV_VAR_NAME","value":"the_value","description":"what it is"}]. Return [] if none found. No other text.',
+        messages: [{ role: 'user', content: `Find any API keys, passwords, tokens, or secrets in this text. Use ALL_CAPS_ENV names:\n\n${transcript}` }],
+      }),
+    })
+
+    let rawText = ''
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n'); buf = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim()
+        if (raw === '[DONE]') break
+        try {
+          const ev = JSON.parse(raw)
+          if (ev.delta?.type === 'text_delta') rawText += ev.delta.text
+        } catch {}
+      }
+    }
+
+    const match = rawText.match(/\[[\s\S]*\]/)
+    if (!match) return
+    const creds = JSON.parse(match[0])
+    if (!Array.isArray(creds) || !creds.length) return
+
+    view = { kind: 'agent-cred-review', session: agentSession, creds }
+    render()
+  } catch (e) {
+    console.warn('Credential detection failed:', e)
+    void generateSkillFromAgentSession()
+  }
+}
+
+async function generateSkillFromAgentSession() {
+  if (!agentSession || !supabase || !currentUser) return
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return
+
+  const transcript = agentSession.messages.map(m => {
+    if (m.role === 'user' && typeof m.content === 'string') return `User: ${m.content}`
+    if (m.role === 'assistant') {
+      const parts = Array.isArray(m.content) ? m.content : [m.content]
+      return parts.map(b => b.type === 'text' ? `Assistant: ${b.text}` : `[Tool: ${b.name}(${JSON.stringify(b.input).slice(0,100)})]`).join('\n')
+    }
+    return ''
+  }).filter(Boolean).join('\n\n').slice(0, 12000)
+
+  const recId = crypto.randomUUID()
+  const now   = new Date().toISOString()
+
+  try {
+    await supabase.from('recordings').insert({
+      id: recId, user_id: currentUser.id,
+      title: agentSession.task.slice(0, 120),
+      status: 'drafting',
+      started_at: new Date(agentSession.startedAt).toISOString(),
+      ended_at: now,
+      duration_ms: agentSession.elapsed || 0,
+      mode: 'skill',
+      transcript: { segments: [{ text: transcript }] },
+      meta: { source: 'agent', platform: window.electronAPI.platform },
+    })
+
+    const fakeRec = { id: recId, title: agentSession.task.slice(0, 120), mode: 'skill', duration_ms: agentSession.elapsed || 0, _agentTranscript: transcript }
+    view = { kind: 'processing', recording: fakeRec, stage: 'drafting', error: null }
+    render()
+
+    const skillRes = await fetch(`${SUPABASE_URL}/functions/v1/generate-skill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ recording_id: recId, extra_context: 'This skill was generated from an AI agent execution session.' }),
+    })
+
+    if (!skillRes.ok) {
+      view = { kind: 'idle', tab: 'library' }; render()
+      return
+    }
+
+    let finalSkill = null
+    const reader2 = skillRes.body.getReader()
+    const dec2 = new TextDecoder()
+    let buf2 = '', liveText = ''
+
+    while (true) {
+      const { done, value } = await reader2.read()
+      if (done) break
+      buf2 += dec2.decode(value, { stream: true })
+      const lines = buf2.split('\n'); buf2 = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim()
+        if (raw === '[DONE]') break
+        try {
+          const ev = JSON.parse(raw)
+          if (ev.type === 'chunk') { liveText += ev.text; const lv = document.getElementById('live-skill-text'); if (lv) lv.textContent = liveText }
+          if (ev.type === 'done') finalSkill = ev.skill
+        } catch {}
+      }
+    }
+
+    if (!finalSkill) { view = { kind: 'idle', tab: 'library' }; render(); return }
+    const { data: rData } = await supabase.from('recordings').select('*, skills(*)').eq('id', recId).single()
+    const skillObj = rData?.skills?.[0] ?? finalSkill
+    view = { kind: 'skill', recording: rData ?? fakeRec, skill: skillObj, allSkills: rData?.skills ?? [skillObj] }
+    render()
+  } catch (e) {
+    console.error('Agent skill generation failed:', e)
+    view = { kind: 'idle', tab: 'library' }
+    render()
+  }
+}
+
+// ---- Agent tab ----
+
+function agentTab() {
+  const d = document.createElement('div')
+  d.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:16px;'
+
+  d.innerHTML = `
+    <div class="glass" style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <div class="display" style="font-size:18px;color:#E4AF7A;">Run Agent</div>
+        <p style="font-size:11px;line-height:1.65;margin-top:6px;color:rgba(255,232,199,0.45);">Describe what you want done. Claude will execute it on your computer — terminal, files, browser, and more.</p>
+      </div>
+      <textarea id="agent-task" class="input" rows="5"
+        placeholder="e.g. Go to github.com/TacoDePapel/Scout-Desktop and tell me the latest release details.&#10;&#10;Or: Create a new folder on my Desktop called Projects and add a README.md with a project template."
+        style="resize:vertical;min-height:100px;font-size:12px;line-height:1.65;"></textarea>
+      <button id="agent-run" class="btn btn-primary" style="width:100%;font-size:13px;padding:10px;">Run →</button>
+    </div>
+
+    <div class="glass" style="padding:16px;border-color:rgba(182,128,57,0.15);">
+      <div class="label" style="font-size:9px;margin-bottom:10px;">WHAT THE AGENT CAN DO</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">⌨</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Run any PowerShell command on your machine</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📂</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Read and write files anywhere on your computer</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🌐</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Open URLs, click, type, and scrape web pages</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📝</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Turns every completed task into a reusable skill guide</span></div>
+      </div>
+    </div>
+  `
+
+  d.querySelector('#agent-run').onclick = () => {
+    const task = d.querySelector('#agent-task').value.trim()
+    if (!task) return
+    void runAgent(task)
+  }
+  d.querySelector('#agent-task').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      const task = d.querySelector('#agent-task').value.trim()
+      if (task) void runAgent(task)
+    }
+  })
+  return d
+}
+
+// ---- Agent running view ----
+
+function agentRunningView(session) {
+  const d = document.createElement('div')
+  d.style.cssText = 'padding:16px 20px;display:flex;flex-direction:column;gap:12px;'
+
+  const header = document.createElement('div')
+  header.className = 'glass'
+  header.style.cssText = 'padding:16px;'
+  header.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
+      <div class="display" style="font-size:16px;color:#E4AF7A;line-height:1.3;flex:1;">${escapeHtml(session.task.slice(0, 80))}${session.task.length > 80 ? '…' : ''}</div>
+      <button id="agent-stop" class="btn" style="font-size:11px;padding:5px 10px;flex-shrink:0;color:#F87171;border-color:rgba(248,113,113,0.3);">${session.done ? '← Library' : 'Stop'}</button>
+    </div>
+    <div id="agent-status" style="display:flex;align-items:center;gap:6px;">
+      ${!session.done ? '<div style="width:6px;height:6px;border-radius:50%;background:#4ADE80;animation:pulse-dot-green 1.2s ease infinite;flex-shrink:0;"></div>' : '<div style="width:6px;height:6px;border-radius:50%;background:rgba(255,232,199,0.28);flex-shrink:0;"></div>'}
+      <span style="font-size:10px;color:rgba(255,232,199,0.45);">${session.done ? `Completed in ${Math.round((session.elapsed||0)/1000)}s` : 'Agent running…'}</span>
+    </div>
+  `
+  header.querySelector('#agent-stop').onclick = () => {
+    if (session.done) { view = { kind: 'idle', tab: 'library' }; render(); return }
+    session.stopped = true
+    session.done = true
+    session.elapsed = Date.now() - session.startedAt
+    updateAgentView()
+  }
+  d.appendChild(header)
+
+  const feedWrap = document.createElement('div')
+  feedWrap.className = 'glass'
+  feedWrap.style.cssText = 'padding:14px 16px;flex:1;min-height:300px;max-height:480px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;'
+
+  const streamText = document.createElement('div')
+  streamText.id = 'agent-stream-text'
+  streamText.style.cssText = 'font-size:12px;line-height:1.65;color:rgba(255,232,199,0.55);white-space:pre-wrap;font-style:italic;'
+
+  const feed = document.createElement('div')
+  feed.id = 'agent-feed'
+  feed.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+
+  feedWrap.appendChild(streamText)
+  feedWrap.appendChild(feed)
+  d.appendChild(feedWrap)
+
+  const doneBar = document.createElement('div')
+  doneBar.id = 'agent-done-bar'
+  doneBar.style.cssText = `display:${session.done ? 'flex' : 'none'};gap:8px;`
+  doneBar.innerHTML = `
+    <button id="agent-view-skill" class="btn btn-primary" style="flex:1;font-size:12px;">View Skill →</button>
+    <button id="agent-new" class="btn" style="flex:1;font-size:12px;">New Task</button>
+  `
+  doneBar.querySelector('#agent-view-skill').onclick = () => { view = { kind: 'idle', tab: 'library' }; render() }
+  doneBar.querySelector('#agent-new').onclick = () => { agentSession = null; view = { kind: 'idle', tab: 'agent' }; render() }
+  d.appendChild(doneBar)
+
+  setTimeout(() => updateAgentView(), 0)
+  return d
+}
+
+// ---- Credential review view ----
+
+function agentCredReviewView(session, creds) {
+  const d = document.createElement('div')
+  d.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:14px;'
+
+  d.innerHTML = `
+    <div class="glass" style="padding:16px;">
+      <div class="display" style="font-size:16px;color:#E4AF7A;margin-bottom:6px;">Credentials Detected</div>
+      <p style="font-size:11px;line-height:1.65;color:rgba(255,232,199,0.50);">The agent encountered these credentials during the task. Save them to an encrypted <code style="font-family:monospace;background:rgba(182,128,57,0.12);padding:1px 4px;border-radius:3px;color:#E4AF7A;">.env</code> file?</p>
+    </div>
+  `
+
+  const credList = document.createElement('div')
+  credList.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+
+  const approved = new Map()
+  for (const cred of creds) {
+    approved.set(cred.key, true)
+    const card = document.createElement('div')
+    card.className = 'glass'
+    card.style.cssText = 'padding:12px 14px;'
+    card.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#E4AF7A;">${escapeHtml(cred.key)}</div>
+          <div style="font-size:10px;color:rgba(255,232,199,0.40);margin-top:2px;">${escapeHtml(cred.description || '')}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex-shrink:0;">
+          <input type="checkbox" data-key="${escapeHtml(cred.key)}" checked style="accent-color:#E4AF7A;width:14px;height:14px;cursor:pointer;">
+          <span style="font-size:10px;color:rgba(255,232,199,0.45);">Save</span>
+        </label>
+      </div>
+      <div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:rgba(255,232,199,0.30);word-break:break-all;background:rgba(0,0,0,0.28);padding:5px 7px;border-radius:4px;">${escapeHtml((cred.value || '').slice(0, 60))}${(cred.value || '').length > 60 ? '…' : ''}</div>
+    `
+    card.querySelector('input').onchange = e => approved.set(cred.key, e.target.checked)
+    credList.appendChild(card)
+  }
+  d.appendChild(credList)
+
+  const envPathWrap = document.createElement('div')
+  envPathWrap.className = 'glass'
+  envPathWrap.style.cssText = 'padding:14px;'
+  const defaultEnvPath = `C:\\Users\\${(currentUser?.email || 'user').split('@')[0]}\\.env`
+  envPathWrap.innerHTML = `
+    <div class="label" style="font-size:9px;margin-bottom:6px;">SAVE TO FILE</div>
+    <input id="env-path" class="input" type="text" value="${escapeHtml(defaultEnvPath)}" style="font-size:11px;font-family:'JetBrains Mono',monospace;width:100%;" />
+    <p style="font-size:10px;margin-top:6px;color:rgba(255,232,199,0.30);line-height:1.5;">Existing keys are not overwritten. New keys are appended.</p>
+  `
+  d.appendChild(envPathWrap)
+
+  const btnRow = document.createElement('div')
+  btnRow.style.cssText = 'display:flex;gap:8px;'
+  btnRow.innerHTML = `
+    <button id="cred-save" class="btn btn-primary" style="flex:1;">Save to .env</button>
+    <button id="cred-skip" class="btn" style="flex:1;">Skip</button>
+  `
+  btnRow.querySelector('#cred-save').onclick = async () => {
+    const filePath = d.querySelector('#env-path').value.trim()
+    if (!filePath) return
+    const entries = creds.filter(c => approved.get(c.key)).map(c => ({ key: c.key, value: c.value }))
+    if (entries.length) {
+      const result = await window.electronAPI.agentSaveEnv({ filePath, entries })
+      if (result?.error) { alert('Could not save .env: ' + result.error); return }
+    }
+    void generateSkillFromAgentSession()
+  }
+  btnRow.querySelector('#cred-skip').onclick = () => { void generateSkillFromAgentSession() }
+  d.appendChild(btnRow)
+
+  return d
 }
 
 // ---- Boot ----
