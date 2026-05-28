@@ -2,7 +2,7 @@
 
 ## What's New
 
-**May 26, 2026 — v2.0**
+**May 27, 2026 — v2.0.0**
 - **Scout now runs in the background.** Start a task in the Agent tab and Scout handles it while you keep using your computer normally. You don't have to wait, watch, or babysit it. When it's done, the result appears and a skill guide is saved automatically.
 - **Scout watches your screen.** The new Monitor tab takes a screenshot of your desktop every 10 seconds and keeps the last 5 minutes of activity. Nothing is uploaded — it all stays on your machine. When something interesting happens, you can turn it into a skill in one click.
 - **The agent can use any tool you give it.** Scout now connects to MCP servers — the same ones Claude Code uses — so it can talk to Slack, GitHub, Notion, Linear, or any other tool your team uses. Add servers to your `~/.claude.json` file and Scout picks them up automatically on launch.
@@ -22,7 +22,7 @@
 
 ## Download
 
-**[Download Scout Setup 1.0.0.exe](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)**
+**[Download Scout Setup 2.0.0.exe](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)**
 
 Double-click the installer. Scout installs silently and opens automatically.
 Windows 10/11 · x64
