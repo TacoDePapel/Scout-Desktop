@@ -2,6 +2,12 @@
 
 ## What's New
 
+**May 28, 2026**
+- **Agent runs on Claude Sonnet 4.6.** The `agent-run` edge function now uses the latest model — faster responses and better tool use.
+- **Agent endpoint is now protected.** The edge function requires a valid session token, so only authenticated Scout users can invoke it.
+- **Monitor uses less memory.** Screen frames are now stored as JPEG instead of PNG — about 10× smaller per frame, so the 5-minute buffer takes ~600 KB instead of ~6 MB.
+- **Malformed MCP config now warns instead of silently failing.** If `~/.claude.json` exists but can't be parsed, Scout logs a warning on startup so you know to fix it.
+
 **May 27, 2026 — v2.0.0**
 - **Scout now runs in the background.** Start a task in the Agent tab and Scout handles it while you keep using your computer normally. You don't have to wait, watch, or babysit it. When it's done, the result appears and a skill guide is saved automatically.
 - **Scout watches your screen.** The new Monitor tab takes a screenshot of your desktop every 10 seconds and keeps the last 5 minutes of activity. Nothing is uploaded — it all stays on your machine. When something interesting happens, you can turn it into a skill in one click.
@@ -112,11 +118,11 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 | Layer | Technology |
 |---|---|
 | Desktop shell | Electron 35 |
-| AI agent | Claude via Supabase Edge Function (`agent-run`) · SSE streaming · tool use |
+| AI agent | Claude Sonnet 4.6 via Supabase Edge Function (`agent-run`) · SSE streaming · tool use · JWT-verified |
 | Agent execution | Main process (Node.js 22 native `fetch`) — survives window close |
 | Agent tools | PowerShell · Node.js fs · Electron BrowserWindow · desktopCapturer |
 | MCP integration | JSON-RPC over stdio · reads `~/.claude.json` automatically |
-| Screen monitor | `desktopCapturer` at 10s interval · up to 30 frames in memory |
+| Screen monitor | `desktopCapturer` at 10s interval · up to 30 JPEG frames in memory (~600 KB) |
 | System tray | Electron `Tray` + `Menu` · status indicator + quick controls |
 | AI transcription | Gemini Flash (via Supabase Edge Function) |
 | AI skill generation | Claude (via Supabase Edge Function, SSE streaming) |
@@ -144,8 +150,8 @@ The agent requires a Supabase edge function and an Anthropic API key:
 # 1. Login to Supabase CLI
 npx supabase login
 
-# 2. Deploy the function
-npx supabase functions deploy agent-run --project-ref wmicxsafqbixedpjhchc --no-verify-jwt
+# 2. Deploy the function (JWT verification enabled by default)
+npx supabase functions deploy agent-run --project-ref wmicxsafqbixedpjhchc
 
 # 3. Set the Anthropic API key secret in Supabase dashboard:
 #    Edge Functions → Secrets → Add → ANTHROPIC_API_KEY
