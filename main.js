@@ -122,21 +122,20 @@ const mcpClients = new Map()
 
 async function loadMCPServers() {
   const configPath = path.join(os.homedir(), '.claude.json')
-  try {
-    const raw     = fs.readFileSync(configPath, 'utf8')
-    const config  = JSON.parse(raw)
-    const servers = config.mcpServers ?? {}
-    for (const [name, conf] of Object.entries(servers)) {
-      try {
-        const client = new MCPClient(name)
-        await client.start(conf.command, conf.args ?? [], conf.env ?? {})
-        mcpClients.set(name, client)
-        console.log(`MCP [${name}]: connected, ${client.tools.length} tools`)
-      } catch (e) {
-        console.warn(`MCP [${name}]: failed —`, e.message)
-      }
+  let raw, config
+  try { raw = fs.readFileSync(configPath, 'utf8') } catch { return }
+  try { config = JSON.parse(raw) } catch (e) { console.warn('MCP: ~/.claude.json is malformed —', e.message); return }
+  const servers = config.mcpServers ?? {}
+  for (const [name, conf] of Object.entries(servers)) {
+    try {
+      const client = new MCPClient(name)
+      await client.start(conf.command, conf.args ?? [], conf.env ?? {})
+      mcpClients.set(name, client)
+      console.log(`MCP [${name}]: connected, ${client.tools.length} tools`)
+    } catch (e) {
+      console.warn(`MCP [${name}]: failed —`, e.message)
     }
-  } catch {}
+  }
 }
 
 function getMCPTools() {
@@ -458,7 +457,8 @@ async function captureFrame() {
       thumbnailSize: { width: 640, height: 360 },
     })
     if (!sources[0]) return
-    const dataUrl    = sources[0].thumbnail.toDataURL()
+    const jpegBuf = sources[0].thumbnail.toJPEG(60)
+    const dataUrl = `data:image/jpeg;base64,${jpegBuf.toString('base64')}`
     const timestamp  = Date.now()
     const frame      = { dataUrl, timestamp }
     monitorFrames.push(frame)
