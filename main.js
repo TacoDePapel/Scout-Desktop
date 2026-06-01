@@ -175,14 +175,23 @@ function getMCPStatus() {
 
 const SUPABASE_URL = 'https://wmicxsafqbixedpjhchc.supabase.co'
 
+// ---- Platform-aware shell ----
+const IS_WIN = process.platform === 'win32'
+const IS_MAC = process.platform === 'darwin'
+const IS_LINUX = process.platform === 'linux'
+const PLATFORM_LABEL = IS_WIN ? 'Windows' : IS_MAC ? 'macOS' : 'Linux'
+const SHELL_LABEL = IS_WIN ? 'PowerShell' : (process.env.SHELL?.split('/').pop() || 'bash')
+const AGENT_SHELL = IS_WIN ? 'powershell.exe' : (process.env.SHELL || '/bin/bash')
+const BASH_TIMEOUT_MS = 5 * 60 * 1000 // 5 min — real tasks need real time
+
 const AGENT_TOOLS = [
   {
     name: 'bash',
-    description: 'Run a PowerShell command on the user\'s Windows computer. Returns stdout, stderr, and exit code.',
+    description: `Run a shell command on the user's ${PLATFORM_LABEL} computer using ${SHELL_LABEL}. Returns stdout, stderr, and exit code. Use this for git, npm, python, file operations, launching commands, anything available in the terminal. Timeout: 5 minutes.`,
     input_schema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'PowerShell command to run' },
+        command: { type: 'string', description: `${SHELL_LABEL} command to run` },
         cwd:     { type: 'string', description: 'Working directory (optional)' },
       },
       required: ['command'],
@@ -246,16 +255,44 @@ const AGENT_TOOLS = [
     description: 'Take a screenshot of the full desktop to see what is currently on screen.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'open_app',
+    description: `Launch a native application by name (cross-platform). On ${PLATFORM_LABEL}, uses ${IS_WIN ? '"start"' : IS_MAC ? '"open -a"' : 'xdg-open / direct exec'}. Examples: "Slack", "Notion", "Visual Studio Code", "Finder", "Explorer".`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'App name or path' },
+        args: { type: 'array', items: { type: 'string' }, description: 'Optional args / file paths to pass to the app' },
+      },
+      required: ['name'],
+    },
+  },
 ]
 
-const AGENT_SYSTEM = `You are Scout Agent, an AI assistant embedded in a Windows 11 desktop app. You execute tasks on the user's computer using available tools.
+const AGENT_SYSTEM = `You are Scout Agent, an AI teammate embedded in a desktop app on the user's ${PLATFORM_LABEL} computer. You have full access to their machine and execute real work autonomously.
 
-Rules:
-- Plan first, then act efficiently.
-- After browser_open, always take a screenshot to see the page state.
-- Use PowerShell syntax in bash commands.
-- If a tool returns an error, explain it and try an alternative.
-- When done, give a concise summary of what was accomplished.`
+Environment:
+- OS: ${PLATFORM_LABEL} (${process.platform})
+- Shell: ${SHELL_LABEL}
+- Home: ${os.homedir()}
+- Path separator: ${path.sep}
+
+Your tools let you do real things, not toy demos:
+- bash — run any shell command (git clone, npm install, python scripts, ffmpeg, curl, file management, etc.)
+- read_file / write_file / list_dir — read and modify the file system anywhere on the machine
+- open_app — launch installed apps (Slack, Notion, VS Code, Finder, Chrome, etc.)
+- browser_open / browser_action — open URLs and automate them (navigate, click, type, screenshot, eval JS)
+- screenshot_desktop — see exactly what's on the user's screen right now
+- MCP tools (prefixed mcp__server__tool) — talk to GitHub, Slack, Notion, Linear, Supabase, and any other MCP server the user has configured
+
+Operating principles:
+1. Be ambitious. Real tasks: "set up a new React project and push it to GitHub", "find every PDF in Downloads from this month and summarize them", "open Slack and post a status update", "scrape this site and save the results to CSV". Don't reduce a request to a single trivial command unless that's literally what was asked.
+2. Plan in 1-2 sentences, then execute. Show progress as you go — narrate what you're doing between tool calls.
+3. Use ${SHELL_LABEL} syntax in bash commands. ${IS_WIN ? 'PowerShell cmdlets like Get-ChildItem, Set-Location, $env:VAR.' : 'POSIX shell — ls, cd, $VAR, /usr/bin paths.'}
+4. After browser_open, always take a browser screenshot before clicking — you need to see the page state.
+5. If a tool errors, read the error, then try a different approach (don't repeat the same failing call).
+6. Touching ~/.env, credential files, or anything outside the user's expected scope? Mention it first.
+7. When done, summarize in 2-4 lines: what you accomplished, where the output lives, what's next.`
 
 let bgAgent = {
   running:   false,
@@ -270,7 +307,7 @@ async function executeToolInMain(name, input) {
 
   switch (name) {
     case 'bash': return new Promise(resolve => {
-      exec(input.command, { cwd: input.cwd || os.homedir(), timeout: 60000, shell: 'powershell.exe' }, (err, stdout, stderr) => {
+      exec(input.command, { cwd: input.cwd || os.homedir(), timeout: BASH_TIMEOUT_MS, shell: AGENT_SHELL, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
         resolve({ stdout: stdout || '', stderr: stderr || '', exitCode: err?.code ?? 0 })
       })
     })
@@ -327,6 +364,29 @@ async function executeToolInMain(name, input) {
         const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 720 } })
         if (!sources[0]) return { error: 'No screen source' }
         return { dataUrl: sources[0].thumbnail.toDataURL() }
+      } catch (e) { return { error: e.message } }
+    }
+
+    case 'open_app': {
+      try {
+        const appName = input.name
+        const extra   = Array.isArray(input.args) ? input.args : []
+        if (!appName) return { error: 'name is required' }
+        let command, args
+        if (IS_MAC) {
+          command = 'open'
+          args    = ['-a', appName, ...extra]
+        } else if (IS_WIN) {
+          command = 'cmd'
+          args    = ['/c', 'start', '""', appName, ...extra]
+        } else {
+          command = 'xdg-open'
+          args    = [extra[0] || appName]
+        }
+        const child = spawn(command, args, { detached: true, stdio: 'ignore', shell: IS_WIN })
+        child.on('error', () => {})
+        child.unref()
+        return { success: true, app: appName }
       } catch (e) { return { error: e.message } }
     }
 
@@ -627,7 +687,7 @@ ipcMain.handle('agent:save-env', (_, { filePath, entries }) => {
 
 // Legacy agent tool IPC (used by renderer-side agent mode)
 ipcMain.handle('agent:bash', async (_, { command, cwd }) =>
-  new Promise(resolve => exec(command, { cwd: cwd || os.homedir(), timeout: 60000, shell: 'powershell.exe' }, (err, stdout, stderr) =>
+  new Promise(resolve => exec(command, { cwd: cwd || os.homedir(), timeout: BASH_TIMEOUT_MS, shell: AGENT_SHELL, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) =>
     resolve({ stdout: stdout || '', stderr: stderr || '', exitCode: err?.code ?? 0, error: err && !stdout ? err.message : null }))))
 
 ipcMain.handle('agent:read-file',  (_, { path: p }) => { try { return { content: fs.readFileSync(p, 'utf8') } } catch (e) { return { error: e.message } } })

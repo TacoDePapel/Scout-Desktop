@@ -105,6 +105,6 @@ function scoutPixel(x, y, S) {
 // ---- Write file ----
 const outDir = path.join(__dirname, '..', 'build')
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
-const png = makePNG(512, scoutPixel)
+const png = makePNG(1024, scoutPixel)
 fs.writeFileSync(path.join(outDir, 'icon.png'), png)
-console.log('✓ build/icon.png generated (512×512)')
+console.log('✓ build/icon.png generated (1024×1024)')

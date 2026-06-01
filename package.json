@@ -1,13 +1,17 @@
 {
   "name": "scout-desktop",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Scout — AI workflow capture by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
   "scripts": {
     "start": "electron .",
     "gen-icon": "node scripts/gen-icon.js",
-    "dist": "npm run gen-icon && electron-builder --win"
+    "dist": "npm run gen-icon && electron-builder",
+    "dist:win": "npm run gen-icon && electron-builder --win",
+    "dist:mac": "npm run gen-icon && electron-builder --mac",
+    "dist:linux": "npm run gen-icon && electron-builder --linux",
+    "dist:all": "npm run gen-icon && electron-builder -mwl"
   },
   "build": {
     "appId": "agency.orage.scout",
@@ -22,16 +26,12 @@
       "preload.js",
       "renderer.js",
       "index.html",
-      "app.css"
+      "app.css",
+      "build/icon.png"
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+        { "target": "nsis", "arch": ["x64"] }
       ],
       "icon": "build/icon.png"
     },
@@ -43,6 +43,35 @@
       "shortcutName": "Scout",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Scout records your microphone to capture narration for skill guides.",
+        "NSCameraUsageDescription": "Scout does not use the camera.",
+        "NSScreenCaptureDescription": "Scout captures screenshots of your desktop for the screen monitor and for the agent to see what is on screen."
+      }
+    },
+    "dmg": {
+      "title": "Scout ${version}",
+      "writeUpdateInfo": false
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "category": "Office",
+      "icon": "build/icon.png",
+      "synopsis": "AI workflow capture and agent for your desktop"
     }
   },
   "devDependencies": {

@@ -2,6 +2,14 @@
 
 ## What's New
 
+**June 1, 2026 — v2.1.0**
+- **Scout now runs on macOS and Linux.** No more Windows-only. Universal `.dmg` for Mac (Intel + Apple Silicon), `.AppImage` and `.deb` for Linux, alongside the existing Windows installer.
+- **The agent is OS-aware.** It detects whether it's running on Windows, macOS, or Linux and uses the right shell automatically — PowerShell on Windows, your default shell (bash/zsh) on Mac and Linux. No more PowerShell commands failing on Mac.
+- **Agent gets a sharper system prompt.** Rewritten to push Claude toward ambitious, real-world tasks ("set up a project and push it to GitHub") instead of toy ones ("open a folder"). The agent now knows everything it can do, with concrete examples.
+- **New `open_app` tool.** Launches any installed native app cross-platform — Slack, Notion, VS Code, Finder/Explorer, etc.
+- **Shell commands can take their time.** The bash timeout went from 60 seconds to 5 minutes so the agent can run real builds, installs, and scripts.
+- **GitHub Actions release pipeline.** Pushing a `v*` tag automatically builds binaries for all three OSes and publishes a release.
+
 **May 28, 2026**
 - **Agent runs on Claude Sonnet 4.6.** The `agent-run` edge function now uses the latest model — faster responses and better tool use.
 - **Agent endpoint is now protected.** The edge function requires a valid session token, so only authenticated Scout users can invoke it.
@@ -28,10 +36,25 @@
 
 ## Download
 
-**[Download Scout Setup 2.0.0.exe](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)**
+**[Download the latest release →](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)**
 
-Double-click the installer. Scout installs silently and opens automatically.
-Windows 10/11 · x64
+| Platform | File | Notes |
+|---|---|---|
+| Windows 10/11 (x64) | `Scout Setup x.x.x.exe` | Double-click, installs silently, launches automatically. |
+| macOS (Intel + Apple Silicon) | `Scout-x.x.x.dmg` | Drag Scout into Applications. See "First launch on macOS" below. |
+| Linux (x64) | `Scout-x.x.x.AppImage` or `.deb` | `chmod +x Scout-*.AppImage && ./Scout-*.AppImage` — or install the `.deb` with `sudo apt install ./Scout-*.deb`. |
+
+### First launch on macOS
+
+Scout's Mac build is **unsigned** (no Apple Developer ID — yet), so macOS Gatekeeper will refuse to open it the first time. One-time fix:
+
+```bash
+xattr -cr /Applications/Scout.app
+```
+
+Then double-click Scout normally. After that, it launches without any warning. (If you'd rather skip the terminal: right-click the app → **Open** → **Open** in the dialog. Either works.)
+
+You'll be asked for permissions for microphone, screen recording, and accessibility the first time you use those features — these are required for recording, the screen monitor, and the agent's `screenshot_desktop` tool. Grant them in **System Settings → Privacy & Security**.
 
 ---
 
@@ -49,7 +72,8 @@ Scout is an AI-powered desktop agent for teams. It does two things:
 ### Agent Mode
 Scout has a full AI agent powered by Claude that operates your computer — in the background, while you keep working:
 
-- **Terminal** — runs any PowerShell command, scripts, git, npm, Python, and more
+- **Terminal** — runs any shell command (PowerShell on Windows, bash/zsh on macOS/Linux), scripts, git, npm, Python, and more
+- **Native apps** — opens any installed app (Slack, Notion, VS Code, Finder/Explorer, etc.) cross-platform
 - **File system** — reads, writes, creates, and organizes files anywhere on your machine
 - **Browser** — opens URLs, takes screenshots, clicks buttons, fills forms, and scrapes pages
 - **Desktop screenshots** — sees your full screen at any moment to react to what's actually on it
@@ -110,6 +134,8 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 - Background persistence — closing the window does not stop an active agent or monitor
 - OS-native Save dialogs for exporting files
 - One-click Windows installer — creates desktop and Start Menu shortcuts, launches automatically after install
+- Universal macOS `.dmg` (Intel + Apple Silicon) — drag to Applications and launch
+- Linux `.AppImage` and `.deb` packages
 
 ---
 
@@ -120,7 +146,7 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 | Desktop shell | Electron 35 |
 | AI agent | Claude Sonnet 4.6 via Supabase Edge Function (`agent-run`) · SSE streaming · tool use · JWT-verified |
 | Agent execution | Main process (Node.js 22 native `fetch`) — survives window close |
-| Agent tools | PowerShell · Node.js fs · Electron BrowserWindow · desktopCapturer |
+| Agent tools | Platform-aware shell (PowerShell on Windows, bash/zsh on macOS/Linux) · Node.js fs · Electron BrowserWindow · desktopCapturer · cross-platform `open_app` |
 | MCP integration | JSON-RPC over stdio · reads `~/.claude.json` automatically |
 | Screen monitor | `desktopCapturer` at 10s interval · up to 30 JPEG frames in memory (~600 KB) |
 | System tray | Electron `Tray` + `Menu` · status indicator + quick controls |
@@ -128,7 +154,7 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 | AI skill generation | Claude (via Supabase Edge Function, SSE streaming) |
 | Backend / Auth / Storage | Supabase (Postgres + Storage + Auth) |
 | Credential vault | `.env` file · AI-assisted detection · user approval required |
-| Packaging | electron-builder · NSIS installer |
+| Packaging | electron-builder · NSIS (Windows) · DMG + ZIP (macOS, universal) · AppImage + deb (Linux) · GitHub Actions cross-platform CI |
 
 ---
 
@@ -136,11 +162,15 @@ After you stop recording, Scout runs a three-stage pipeline automatically:
 
 ```bash
 npm install
-npm start          # run in dev mode
-npm run dist       # build installer → dist/Scout Setup x.x.x.exe
+npm start                  # run in dev mode (any OS)
+
+npm run dist:win           # Windows installer → dist/Scout Setup x.x.x.exe
+npm run dist:mac           # macOS dmg + zip   → dist/Scout-x.x.x.dmg (run on macOS)
+npm run dist:linux         # Linux AppImage + deb → dist/Scout-x.x.x.AppImage (run on Linux)
+npm run dist               # build for the current platform
 ```
 
-Requires Node.js 18+ and Windows (for the installer target).
+Requires Node.js 18+. Each platform installer must be built on its matching OS (the GitHub Actions workflow at `.github/workflows/release.yml` does this automatically — push a `v*` tag and a multi-platform release is created).
 
 ### Deploying the Agent Edge Function
 
