@@ -1,6 +1,17 @@
 # Scout Desktop
 
+> **One-click downloads → https://tacodepapel.github.io/Scout-Desktop**
+> The landing page auto-detects Mac (Apple Silicon / Intel), Windows, or Linux and serves the right installer. Share this URL — no GitHub navigation needed.
+
+---
+
 ## What's New
+
+**June 1, 2026 — v2.1.1**
+- **Public download page.** One short URL works on any device: `tacodepapel.github.io/Scout-Desktop`. Detects your OS (and your Mac's chip on modern browsers) and shows the right download button.
+- **Stable release-asset URLs.** Filenames no longer include the version number — `Scout-mac-arm64.dmg`, `Scout-windows-x64.exe`, etc. — so the landing-page links keep working through every future release.
+- **Polished macOS tray icon.** Monochrome template image that auto-tints for the menu bar (white on dark, black on light) instead of the old colored blob.
+- **Renderer-side agent is fully OS-aware** too — no more leftover "PowerShell on Windows" assumptions in the legacy code path.
 
 **June 1, 2026 — v2.1.0**
 - **Scout now runs on macOS and Linux.** No more Windows-only. Universal `.dmg` for Mac (Intel + Apple Silicon), `.AppImage` and `.deb` for Linux, alongside the existing Windows installer.
@@ -36,13 +47,17 @@
 
 ## Download
 
-**[Download the latest release →](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)**
+**The easy way: open [tacodepapel.github.io/Scout-Desktop](https://tacodepapel.github.io/Scout-Desktop) on the computer you want to install Scout on.** The page auto-detects your OS and gives you one download button. Done.
 
-| Platform | File | Notes |
-|---|---|---|
-| Windows 10/11 (x64) | `Scout Setup x.x.x.exe` | Double-click, installs silently, launches automatically. |
-| macOS (Intel + Apple Silicon) | `Scout-x.x.x.dmg` | Drag Scout into Applications. See "First launch on macOS" below. |
-| Linux (x64) | `Scout-x.x.x.AppImage` or `.deb` | `chmod +x Scout-*.AppImage && ./Scout-*.AppImage` — or install the `.deb` with `sudo apt install ./Scout-*.deb`. |
+**Direct links** (stable across versions — `latest` always resolves to the newest release):
+
+| Platform | URL |
+|---|---|
+| **macOS — Apple Silicon** (M1/M2/M3/M4) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-arm64.dmg |
+| **macOS — Intel** | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-x64.dmg |
+| **Windows** 10 / 11 (x64) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-windows-x64.exe |
+| **Linux** AppImage (x64) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.AppImage |
+| **Linux** Debian/Ubuntu (x64) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.deb |
 
 ### First launch on macOS
 
@@ -186,6 +201,20 @@ npx supabase functions deploy agent-run --project-ref wmicxsafqbixedpjhchc
 # 3. Set the Anthropic API key secret in Supabase dashboard:
 #    Edge Functions → Secrets → Add → ANTHROPIC_API_KEY
 ```
+
+---
+
+## Hosting the download page (one-time setup)
+
+The download landing page lives at `docs/index.html` in this repo and is served free via GitHub Pages.
+
+**To turn it on** (only needs to be done once per repo):
+1. Go to **Settings → Pages** on the GitHub repo.
+2. Under **Build and deployment → Source**, pick **Deploy from a branch**.
+3. Choose **Branch:** `main`, **Folder:** `/docs`, then **Save**.
+4. Wait ~1 minute. The page becomes live at https://tacodepapel.github.io/Scout-Desktop.
+
+After that, any change you push to `docs/index.html` redeploys automatically. To use a custom domain later (e.g. `scout.orage.agency`), add a CNAME DNS record pointing to `tacodepapel.github.io` and create a `docs/CNAME` file containing the domain.
 
 ---
 

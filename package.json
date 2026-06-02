@@ -1,6 +1,6 @@
 {
   "name": "scout-desktop",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Scout — AI workflow capture by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
@@ -35,7 +35,8 @@
       "target": [
         { "target": "nsis", "arch": ["x64"] }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Scout-windows-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": true,
@@ -56,6 +57,7 @@
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
+      "artifactName": "Scout-mac-${arch}.${ext}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Scout records your microphone to capture narration for skill guides.",
         "NSCameraUsageDescription": "Scout does not use the camera.",
@@ -73,7 +75,8 @@
       ],
       "category": "Office",
       "icon": "build/icon.png",
-      "synopsis": "AI workflow capture and agent for your desktop"
+      "synopsis": "AI workflow capture and agent for your desktop",
+      "artifactName": "Scout-linux-${arch}.${ext}"
     }
   },
   "devDependencies": {

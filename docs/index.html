@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scout — AI workflow capture for your desktop</title>
+<meta name="description" content="Scout is an AI teammate that lives on your computer. Record what you do and Scout turns it into a skill guide — or tell Scout what you want done and it handles it for you.">
+<meta property="og:title" content="Scout — AI teammate for your desktop">
+<meta property="og:description" content="Record what you do or tell Scout what to do. Mac, Windows, Linux.">
+<meta property="og:type" content="website">
+<link rel="icon" href="https://github.com/TacoDePapel/Scout-Desktop/raw/main/build/icon.png">
+<style>
+  :root {
+    --bg: #0F1424;
+    --bg-2: #1C2540;
+    --bg-3: #2A3450;
+    --ink: #FFE8C7;
+    --ink-2: rgba(255,232,199,0.65);
+    --ink-3: rgba(255,232,199,0.35);
+    --gold: #E4AF7A;
+    --gold-2: #B68039;
+    --line: rgba(228,175,122,0.18);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif; -webkit-font-smoothing: antialiased; min-height: 100%; }
+  body {
+    background:
+      radial-gradient(800px 500px at 20% -10%, rgba(228,175,122,0.10), transparent 70%),
+      radial-gradient(700px 500px at 110% 10%, rgba(182,128,57,0.10), transparent 70%),
+      var(--bg);
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 80px 24px 96px; }
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 56px; }
+  .brand img { width: 44px; height: 44px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+  .brand b { font-size: 18px; letter-spacing: 0.4px; }
+  .brand small { color: var(--ink-3); font-size: 11px; display: block; letter-spacing: 0.6px; text-transform: uppercase; margin-top: 2px; }
+  h1 { font-size: clamp(36px, 6vw, 56px); line-height: 1.05; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 18px; }
+  h1 span { color: var(--gold); }
+  .sub { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 560px; margin-bottom: 40px; }
+  .card { background: rgba(28,37,64,0.6); border: 1px solid var(--line); border-radius: 16px; padding: 28px; backdrop-filter: blur(10px); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-3); letter-spacing: 0.8px; text-transform: uppercase; background: rgba(228,175,122,0.07); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; margin-bottom: 18px; }
+  .pill .dot { width: 5px; height: 5px; border-radius: 999px; background: var(--gold); }
+  .detected { font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+  .detected b { color: var(--ink); }
+  .primary-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 16px 22px; border-radius: 12px; font-size: 15px; font-weight: 600;
+    text-decoration: none; transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease;
+    border: 1px solid transparent; cursor: pointer; font-family: inherit;
+  }
+  .btn-primary {
+    background: linear-gradient(180deg, var(--gold) 0%, var(--gold-2) 100%);
+    color: #1A1308; box-shadow: 0 10px 30px rgba(228,175,122,0.18);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 16px 36px rgba(228,175,122,0.28); }
+  .btn-secondary {
+    background: transparent; color: var(--ink); border-color: var(--line);
+  }
+  .btn-secondary:hover { background: rgba(228,175,122,0.05); border-color: rgba(228,175,122,0.35); }
+  .btn svg { width: 18px; height: 18px; }
+  .all-platforms { margin-top: 36px; }
+  .all-platforms h3 { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-3); margin-bottom: 14px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .grid a {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    border-radius: 10px; border: 1px solid var(--line); color: var(--ink-2);
+    text-decoration: none; font-size: 13px; transition: all 0.12s ease;
+  }
+  .grid a:hover { color: var(--ink); border-color: rgba(228,175,122,0.45); background: rgba(228,175,122,0.04); }
+  .grid a .os { font-weight: 600; color: var(--ink); margin-right: 4px; }
+  .grid a .arch { color: var(--ink-3); font-size: 11px; }
+  .note { font-size: 12px; color: var(--ink-3); line-height: 1.6; margin-top: 24px; padding: 14px 16px; border-left: 2px solid var(--gold-2); background: rgba(182,128,57,0.05); border-radius: 4px; }
+  .note code { background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; font-size: 11px; color: var(--ink); }
+  .features { margin-top: 56px; }
+  .features h2 { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--ink-3); margin-bottom: 16px; font-weight: 600; }
+  .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .feature { padding: 18px; border-radius: 12px; border: 1px solid var(--line); background: rgba(28,37,64,0.4); }
+  .feature .ico { font-size: 18px; margin-bottom: 8px; }
+  .feature b { display: block; font-size: 13px; margin-bottom: 4px; }
+  .feature p { font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+  footer { margin-top: 64px; padding-top: 28px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+  footer a { color: var(--ink-2); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+  @media (max-width: 520px) { .wrap { padding: 48px 18px 64px; } .card { padding: 22px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">
+    <img src="https://github.com/TacoDePapel/Scout-Desktop/raw/main/build/icon.png" alt="Scout">
+    <div>
+      <b>Scout</b>
+      <small>by Orage AI Agency</small>
+    </div>
+  </div>
+
+  <h1>An AI teammate that lives on <span>your computer.</span></h1>
+  <p class="sub">Record what you do and Scout turns it into a skill guide your AI can follow later — or just tell Scout what you want done and it handles the task for you.</p>
+
+  <div class="card" id="download-card">
+    <div class="pill"><span class="dot"></span><span id="version-pill">Latest release</span></div>
+    <div class="detected" id="detected">Detecting your device…</div>
+    <div class="primary-row" id="primary"></div>
+  </div>
+
+  <div class="all-platforms">
+    <h3>All downloads</h3>
+    <div class="grid">
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-arm64.dmg">
+        <span class="os">macOS</span><span class="arch">Apple Silicon · .dmg</span>
+      </a>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-x64.dmg">
+        <span class="os">macOS</span><span class="arch">Intel · .dmg</span>
+      </a>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-windows-x64.exe">
+        <span class="os">Windows</span><span class="arch">10 / 11 · .exe installer</span>
+      </a>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.AppImage">
+        <span class="os">Linux</span><span class="arch">x64 · AppImage</span>
+      </a>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.deb">
+        <span class="os">Linux</span><span class="arch">Debian / Ubuntu · .deb</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="note" id="note-mac" style="display:none;">
+    <b>First launch on macOS:</b> Scout is currently unsigned, so macOS will block it once. After dragging Scout into Applications, open Terminal and run <code>xattr -cr /Applications/Scout.app</code>. Then Scout opens normally. <a href="https://github.com/TacoDePapel/Scout-Desktop#first-launch-on-macos" style="color:var(--gold);">Full instructions →</a>
+  </div>
+
+  <div class="features">
+    <h2>What Scout does</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="ico">🎙️</div>
+        <b>Record any task</b>
+        <p>Capture your screen + voice. Scout's AI writes a clean step-by-step skill guide automatically.</p>
+      </div>
+      <div class="feature">
+        <div class="ico">⚙️</div>
+        <b>Run real tasks for you</b>
+        <p>Tell Scout what you want done. The built-in Claude agent uses your terminal, files, apps, and browser to finish the job — autonomously.</p>
+      </div>
+      <div class="feature">
+        <div class="ico">👁️</div>
+        <b>Watches your screen</b>
+        <p>Optional passive monitor keeps the last 5 minutes of your desktop locally so you can turn anything interesting into a skill in one click.</p>
+      </div>
+      <div class="feature">
+        <div class="ico">🔌</div>
+        <b>MCP-connected</b>
+        <p>Auto-loads any MCP server in your <code style="font-size:11px;">~/.claude.json</code> — Slack, Notion, GitHub, Linear, you name it.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>© 2026 Orage AI Agency · Built with Electron + Claude</span>
+    <span><a href="https://github.com/TacoDePapel/Scout-Desktop">Source on GitHub</a> · <a href="https://github.com/TacoDePapel/Scout-Desktop/releases">All releases</a></span>
+  </footer>
+
+</div>
+
+<script>
+(async () => {
+  const REPO = 'TacoDePapel/Scout-Desktop';
+  const BASE = `https://github.com/${REPO}/releases/latest/download`;
+
+  const detectedEl = document.getElementById('detected');
+  const primaryEl  = document.getElementById('primary');
+  const versionEl  = document.getElementById('version-pill');
+  const noteMac    = document.getElementById('note-mac');
+
+  // ---- OS detection ----
+  const ua = navigator.userAgent || '';
+  let os = 'unknown';
+  if (/Mac|Macintosh/i.test(ua) && !/iPhone|iPad/i.test(ua)) os = 'mac';
+  else if (/Windows/i.test(ua))                              os = 'windows';
+  else if (/Linux/i.test(ua) && !/Android/i.test(ua))        os = 'linux';
+  else if (/Android/i.test(ua))                              os = 'android';
+  else if (/iPhone|iPad/i.test(ua))                          os = 'ios';
+
+  // ---- Arch detection (best effort) ----
+  let arch = 'x64';
+  let archKnown = false;
+  try {
+    if (os === 'mac' && navigator.userAgentData?.getHighEntropyValues) {
+      const v = await navigator.userAgentData.getHighEntropyValues(['architecture']);
+      if (v.architecture === 'arm') { arch = 'arm64'; archKnown = true; }
+      else if (v.architecture === 'x86') { arch = 'x64'; archKnown = true; }
+    }
+  } catch {}
+
+  // ---- Try to fetch latest version (decorative) ----
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.tag_name) versionEl.textContent = `Latest · ${j.tag_name}`;
+    }
+  } catch {}
+
+  // ---- Render primary download(s) ----
+  function btn(label, href, primary = true) {
+    const a = document.createElement('a');
+    a.className = primary ? 'btn btn-primary' : 'btn btn-secondary';
+    a.href = href;
+    a.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${label}</span>`;
+    return a;
+  }
+
+  if (os === 'mac') {
+    noteMac.style.display = 'block';
+    if (archKnown && arch === 'arm64') {
+      detectedEl.innerHTML = `Detected: <b>macOS · Apple Silicon</b>`;
+      primaryEl.append(btn('Download Scout for Mac (Apple Silicon)', `${BASE}/Scout-mac-arm64.dmg`));
+      primaryEl.append(btn('Intel version', `${BASE}/Scout-mac-x64.dmg`, false));
+    } else if (archKnown && arch === 'x64') {
+      detectedEl.innerHTML = `Detected: <b>macOS · Intel</b>`;
+      primaryEl.append(btn('Download Scout for Mac (Intel)', `${BASE}/Scout-mac-x64.dmg`));
+      primaryEl.append(btn('Apple Silicon version', `${BASE}/Scout-mac-arm64.dmg`, false));
+    } else {
+      detectedEl.innerHTML = `Detected: <b>macOS</b> — pick your chip below`;
+      primaryEl.append(btn('Apple Silicon (M1 / M2 / M3 / M4)', `${BASE}/Scout-mac-arm64.dmg`));
+      primaryEl.append(btn('Intel Mac', `${BASE}/Scout-mac-x64.dmg`, false));
+    }
+  } else if (os === 'windows') {
+    detectedEl.innerHTML = `Detected: <b>Windows 10 / 11</b>`;
+    primaryEl.append(btn('Download Scout for Windows', `${BASE}/Scout-windows-x64.exe`));
+  } else if (os === 'linux') {
+    detectedEl.innerHTML = `Detected: <b>Linux</b>`;
+    primaryEl.append(btn('Download AppImage', `${BASE}/Scout-linux-x64.AppImage`));
+    primaryEl.append(btn('Debian / Ubuntu (.deb)', `${BASE}/Scout-linux-x64.deb`, false));
+  } else if (os === 'android' || os === 'ios') {
+    detectedEl.innerHTML = `Scout is a <b>desktop app</b> — open this page on your Mac, Windows, or Linux computer to install. There is no mobile version yet.`;
+  } else {
+    detectedEl.innerHTML = `We couldn't auto-detect your OS. Pick one below.`;
+    primaryEl.append(btn('Mac (Apple Silicon)', `${BASE}/Scout-mac-arm64.dmg`));
+    primaryEl.append(btn('Windows', `${BASE}/Scout-windows-x64.exe`, false));
+  }
+})();
+</script>
+
+</body>
+</html>
