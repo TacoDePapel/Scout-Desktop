@@ -1940,6 +1940,42 @@ async function generateSkillFromBgSession() {
   } catch (e) { console.error('Bg agent skill gen failed:', e); view = { kind: 'idle', tab: 'library' }; render() }
 }
 
+// ---- Starter tasks ----
+// Real work the agent can do today with no extra setup, tuned for service-business owners.
+
+const AGENT_STARTERS = [
+  {
+    icon: '🗂️',
+    title: 'Tidy Downloads',
+    prompt: `Look at every file in my Downloads folder. Group them by type — PDFs, images, code, installers, documents, archives — and move each group into a matching subfolder inside Downloads. Skip files I've touched in the last 24 hours. When done, give me a short summary of what moved where.`,
+  },
+  {
+    icon: '🏢',
+    title: 'Set up a client project',
+    prompt: `Create a new client project folder on my Desktop called "Client - [REPLACE WITH NAME]". Inside it, make subfolders: Contract, Deliverables, Notes, Invoices, Assets. Inside Notes, create a README.md with sections for Project Brief, Stakeholders, Timeline, Key Decisions. Open the folder when done.`,
+  },
+  {
+    icon: '🔍',
+    title: 'Audit my website',
+    prompt: `Open my website [REPLACE WITH URL], take a desktop screenshot, then resize the browser to mobile (375px wide) and screenshot again. Look at both. Tell me three concrete things to improve — copy, layout, calls-to-action, anything that looks weak — and save the findings as a markdown report on my Desktop.`,
+  },
+  {
+    icon: '📰',
+    title: 'Research a prospect',
+    prompt: `Research [REPLACE WITH COMPANY NAME] for me. Search the web and find: what they do, their main products or services, key people (founders, leadership), recent news in the last 90 days, and any signals about whether they'd be a good fit for our agency. Save it as a one-page markdown brief on my Desktop.`,
+  },
+  {
+    icon: '📅',
+    title: 'Weekly recap',
+    prompt: `Write a recap of what I worked on this week. Check: git activity in ~/Desktop (or any project folders) from the last 7 days, any meeting notes or markdown files I modified, and screenshots in Downloads/Desktop from this week. Pull it into a "Week ending [today]" markdown summary saved to my Desktop.`,
+  },
+  {
+    icon: '📚',
+    title: 'Summarize my notes',
+    prompt: `Read every .md and .txt file in ~/Desktop/notes (or wherever I keep notes — find it). Pull out the action items, open decisions, and key insights from the last 30 days. Save a single "Notes digest" markdown file on my Desktop, grouped by theme.`,
+  },
+]
+
 // ---- Agent tab ----
 
 function agentTab() {
@@ -1961,8 +1997,19 @@ function agentTab() {
         </div>
         ${mcpPill}
       </div>
+      <div>
+        <div class="label" style="font-size:9px;margin-bottom:8px;letter-spacing:0.14em;">TRY ONE OF THESE</div>
+        <div id="agent-starters" style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${AGENT_STARTERS.map((s, i) => `
+            <button class="agent-starter" data-i="${i}"
+              style="display:inline-flex;align-items:center;gap:6px;padding:7px 11px;font-size:11px;line-height:1;background:rgba(228,175,122,0.06);color:var(--ink,#FFE8C7);border:1px solid rgba(228,175,122,0.18);border-radius:999px;cursor:pointer;font-family:inherit;transition:all 0.12s ease;">
+              <span style="font-size:13px;">${s.icon}</span><span>${escapeHtml(s.title)}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
       <textarea id="agent-task" class="input" rows="5"
-        placeholder="e.g. Go to our GitHub repo and summarise the last 5 commits.&#10;&#10;Or: Create a Projects folder on my Desktop with a README template inside."
+        placeholder="Describe what you want done in plain English. Pick a starter above to see an example, then edit it for your situation."
         style="resize:vertical;min-height:100px;font-size:12px;line-height:1.65;"></textarea>
       <div style="display:flex;gap:8px;">
         <button id="agent-run-bg" class="btn btn-primary" style="flex:1;font-size:13px;padding:10px;">Run in Background →</button>
@@ -1997,6 +2044,26 @@ function agentTab() {
 
   d.querySelector('#agent-run-bg').onclick = runBg
   d.querySelector('#agent-task').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void runBg() })
+
+  for (const chip of d.querySelectorAll('.agent-starter')) {
+    chip.addEventListener('mouseenter', () => {
+      chip.style.background    = 'rgba(228,175,122,0.14)'
+      chip.style.borderColor   = 'rgba(228,175,122,0.45)'
+    })
+    chip.addEventListener('mouseleave', () => {
+      chip.style.background    = 'rgba(228,175,122,0.06)'
+      chip.style.borderColor   = 'rgba(228,175,122,0.18)'
+    })
+    chip.onclick = () => {
+      const idx = parseInt(chip.dataset.i, 10)
+      const starter = AGENT_STARTERS[idx]
+      if (!starter) return
+      const ta = d.querySelector('#agent-task')
+      ta.value = starter.prompt
+      ta.focus()
+      ta.scrollTop = 0
+    }
+  }
   return d
 }
 

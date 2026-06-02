@@ -7,6 +7,11 @@
 
 ## What's New
 
+**June 1, 2026 — v2.1.3**
+- **Starter task pack in the Agent tab.** Six clickable starters tuned for service-business work — tidy Downloads, set up a client project, audit a website, research a prospect, weekly recap, summarize notes. Click one and the textarea fills with a real prompt you can edit before running. No more staring at a blank box.
+- **Native OS notification when the background agent finishes.** Walk away while Scout works; when it's done you get a system notification with a one-line summary. Clicking it brings Scout to the front. Suppressed if the Scout window is already focused.
+- **"Scout" name on Windows notifications.** App user-model ID set so notifications and taskbar entries identify as Scout, not generic Electron.
+
 **June 1, 2026 — v2.1.2**
 - **Friendly download names.** The Releases page now shows plain `Scout Mac.dmg`, `Scout Windows.exe`, `Scout Linux.AppImage`, `Scout Linux.deb` instead of cryptic versioned filenames.
 - **One Mac file for everyone.** The macOS build is now a **universal binary** — same file runs on Apple Silicon and Intel Macs. No more "which chip do I have?" decision.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, shell, safeStorage, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, shell, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron')
 const path    = require('path')
 const fs      = require('fs')
 const os      = require('os')
@@ -295,11 +295,40 @@ Operating principles:
 7. When done, summarize in 2-4 lines: what you accomplished, where the output lives, what's next.`
 
 let bgAgent = {
-  running:   false,
-  task:      '',
-  steps:     [],
-  messages:  [],
-  startedAt: 0,
+  running:     false,
+  task:        '',
+  steps:       [],
+  messages:    [],
+  startedAt:   0,
+  wasStopped:  false,
+}
+
+function notifyAgentDone() {
+  try {
+    if (!Notification.isSupported || !Notification.isSupported()) return
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return
+
+    const lastText = [...bgAgent.steps].reverse().find(s => s.type === 'text' && s.text)
+    const summary  = (lastText?.text?.split('\n').find(l => l.trim()) || bgAgent.task || '')
+      .trim().slice(0, 160)
+    const seconds  = Math.round((bgAgent.elapsed || 0) / 1000)
+    const title    = bgAgent.wasStopped
+      ? 'Scout stopped'
+      : `Scout finished${seconds ? ` · ${seconds}s` : ''}`
+
+    const iconPath = path.join(__dirname, 'build', 'icon.png')
+    const n = new Notification({
+      title,
+      body:   summary || 'Open Scout to see the result.',
+      icon:   fs.existsSync(iconPath) ? iconPath : undefined,
+      silent: false,
+    })
+    n.on('click', () => {
+      if (!mainWindow) createWindow()
+      else { mainWindow.show(); mainWindow.focus() }
+    })
+    n.show()
+  } catch {}
 }
 
 async function executeToolInMain(name, input) {
@@ -395,7 +424,7 @@ async function executeToolInMain(name, input) {
 }
 
 async function runBgAgent(task, token) {
-  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now() }
+  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false }
   updateTray()
   send('agent:update', { type: 'start', task })
 
@@ -499,6 +528,7 @@ async function runBgAgent(task, token) {
   bgAgent.elapsed = Date.now() - bgAgent.startedAt
   send('agent:update', { type: 'done', elapsed: bgAgent.elapsed, steps: bgAgent.steps })
   updateTray()
+  notifyAgentDone()
 }
 
 // ================================================================
@@ -574,7 +604,7 @@ function buildTrayMenu() {
     { label: monitorActive      ? '● Monitor active'  : 'Monitor off',   enabled: false },
     { label: `MCP: ${mcpClients.size} server${mcpClients.size !== 1 ? 's' : ''}`, enabled: false },
     { type: 'separator' },
-    { label: 'Stop Agent',        enabled: bgAgent.running,    click: () => { bgAgent.running = false; updateTray() } },
+    { label: 'Stop Agent',        enabled: bgAgent.running,    click: () => { bgAgent.running = false; bgAgent.wasStopped = true; updateTray() } },
     { label: monitorActive ? 'Stop Monitor' : 'Start Monitor', click: () => { monitorActive ? stopMonitor() : startMonitor() } },
     { type: 'separator' },
     { label: 'Quit Scout',        click: () => { mcpClients.forEach(c => c.stop()); app.quit() } },
@@ -670,7 +700,7 @@ ipcMain.handle('agent:start-bg', async (_, { task, token }) => {
   void runBgAgent(task, token)
   return { ok: true }
 })
-ipcMain.handle('agent:stop-bg', () => { bgAgent.running = false; return { ok: true } })
+ipcMain.handle('agent:stop-bg', () => { bgAgent.running = false; bgAgent.wasStopped = true; return { ok: true } })
 ipcMain.handle('agent:get-state', () => ({ running: bgAgent.running, task: bgAgent.task, startedAt: bgAgent.startedAt }))
 
 // Monitor
@@ -727,6 +757,9 @@ ipcMain.handle('agent:browser-action', async (_, { action, selector, text, scrip
 // ================================================================
 
 app.whenReady().then(async () => {
+  // Ensures notifications and taskbar entries show "Scout" on Windows
+  // instead of a generic Electron label.
+  if (IS_WIN) app.setAppUserModelId('agency.orage.scout')
   createWindow()
   setupTray()
 
