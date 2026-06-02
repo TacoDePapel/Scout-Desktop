@@ -27,7 +27,9 @@
       "renderer.js",
       "index.html",
       "app.css",
-      "build/icon.png"
+      "build/icon.png",
+      "build/trayTemplate.png",
+      "build/trayTemplate@2x.png"
     ],
     "win": {
       "target": [

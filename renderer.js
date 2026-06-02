@@ -1,5 +1,27 @@
 // Scout Desktop — renderer.js v1.0.0
 
+// ---- Platform ----
+
+const PLATFORM = (() => {
+  const p = window.electronAPI?.platform || 'win32'
+  const isWin = p === 'win32', isMac = p === 'darwin', isLinux = p === 'linux'
+  return {
+    raw: p,
+    isWin, isMac, isLinux,
+    label:       isWin ? 'Windows'   : isMac ? 'macOS' : 'Linux',
+    shellLabel:  isWin ? 'PowerShell': isMac ? 'zsh/bash' : 'bash',
+    shellSyntax: isWin ? 'PowerShell (Get-ChildItem, $env:VAR, ;)'
+                       : 'POSIX shell (ls, cd, $VAR, /usr/bin)',
+    homeHint:    isWin ? 'C:\\Users\\<you>' : isMac ? '/Users/<you>' : '/home/<you>',
+    defaultEnvPath(user) {
+      const handle = (user?.email || 'user').split('@')[0]
+      if (isWin)   return `C:\\Users\\${handle}\\.env`
+      if (isMac)   return `/Users/${handle}/.env`
+      return `/home/${handle}/.env`
+    },
+  }
+})()
+
 // ---- Settings ----
 
 async function getSetting(key, fallback) {
@@ -1357,11 +1379,11 @@ function skillQualityScore(rec, skill) {
 const AGENT_TOOLS = [
   {
     name: 'bash',
-    description: 'Run a PowerShell command on the user\'s Windows computer. Use for file ops, running scripts, git, npm, Python, reading registry, etc. Stdout and stderr are returned.',
+    description: `Run a shell command on the user's ${PLATFORM.label} computer using ${PLATFORM.shellLabel}. Use for file ops, running scripts, git, npm, Python, etc. Stdout and stderr are returned. Timeout 5 min.`,
     input_schema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'PowerShell command to execute' },
+        command: { type: 'string', description: `${PLATFORM.shellLabel} command to execute` },
         cwd:     { type: 'string', description: 'Working directory (optional, defaults to home)' },
       },
       required: ['command'],
@@ -1426,12 +1448,12 @@ const AGENT_TOOLS = [
   },
 ]
 
-const AGENT_SYSTEM = `You are an AI agent embedded in Scout Desktop, running on a Windows 11 computer. You help users automate tasks by executing commands, reading/writing files, and controlling a browser.
+const AGENT_SYSTEM = `You are an AI agent embedded in Scout Desktop, running on a ${PLATFORM.label} computer (home: ${PLATFORM.homeHint}). You help users automate tasks by executing commands, reading/writing files, and controlling a browser.
 
 Guidelines:
 - Be precise and efficient. Plan your approach, then execute.
 - After browser_open, always take a screenshot first to understand the page state.
-- Use PowerShell-compatible syntax in bash commands.
+- Use ${PLATFORM.shellSyntax} in bash commands.
 - When you write files, confirm the path and content before writing.
 - If you encounter an error, explain it clearly and try an alternative approach.
 - When the task is complete, summarize what you did concisely.`
@@ -1950,7 +1972,7 @@ function agentTab() {
     <div class="glass" style="padding:16px;border-color:rgba(182,128,57,0.15);">
       <div class="label" style="font-size:9px;margin-bottom:10px;">WHAT THE AGENT CAN DO</div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">⌨</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Run any PowerShell command on your machine</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">⌨</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Run any ${PLATFORM.shellLabel} command on your machine</span></div>
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📂</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Read and write files anywhere on your computer</span></div>
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🌐</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Open URLs, click, type, and scrape web pages</span></div>
         ${mcpCount ? `<div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🔌</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">${mcpCount} MCP server${mcpCount !== 1 ? 's' : ''} connected (${Object.keys(mcpStatus).join(', ')})</span></div>` : ''}
@@ -2242,7 +2264,7 @@ function agentCredReviewView(session, creds) {
   const envPathWrap = document.createElement('div')
   envPathWrap.className = 'glass'
   envPathWrap.style.cssText = 'padding:14px;'
-  const defaultEnvPath = `C:\\Users\\${(currentUser?.email || 'user').split('@')[0]}\\.env`
+  const defaultEnvPath = PLATFORM.defaultEnvPath(currentUser)
   envPathWrap.innerHTML = `
     <div class="label" style="font-size:9px;margin-bottom:6px;">SAVE TO FILE</div>
     <input id="env-path" class="input" type="text" value="${escapeHtml(defaultEnvPath)}" style="font-size:11px;font-family:'JetBrains Mono',monospace;width:100%;" />

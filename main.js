@@ -549,6 +549,16 @@ function stopMonitor() {
 // ================================================================
 
 function buildTrayIcon() {
+  // macOS: use a monochrome template image so the menu bar auto-tints it
+  // (white on dark menu bar, black on light) and it adapts to dark/light mode.
+  if (IS_MAC) {
+    const templatePath = path.join(__dirname, 'build', 'trayTemplate.png')
+    if (fs.existsSync(templatePath)) {
+      const img = nativeImage.createFromPath(templatePath)
+      img.setTemplateImage(true)
+      return img
+    }
+  }
   const iconPath = path.join(__dirname, 'build', 'icon.png')
   if (fs.existsSync(iconPath)) {
     return nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })

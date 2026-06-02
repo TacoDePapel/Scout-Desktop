@@ -102,9 +102,35 @@ function scoutPixel(x, y, S) {
   return [r, g, b, a]
 }
 
-// ---- Write file ----
+// ---- macOS tray template (monochrome, alpha-only) ----
+// macOS menu-bar icons must be template images: pure black pixels with alpha,
+// and the system auto-tints them for light/dark menu bars.
+// Design: a solid disc with a small hole in the center — reads clearly at 16px.
+function trayTemplatePixel(x, y, S) {
+  const cx = S / 2, cy = S / 2
+  const d  = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+  const outerR = S * 0.46
+  const innerR = S * 0.16
+
+  if (d > outerR + 0.8) return [0, 0, 0, 0]
+  if (d < innerR - 0.8) return [0, 0, 0, 0]
+
+  let alpha = 255
+  if (d > outerR - 0.5)      alpha = Math.round(255 * smoothstep(outerR + 0.8, outerR - 0.5, d))
+  else if (d < innerR + 0.5) alpha = Math.round(255 * smoothstep(innerR - 0.8, innerR + 0.5, d))
+
+  return [0, 0, 0, alpha]
+}
+
+// ---- Write files ----
 const outDir = path.join(__dirname, '..', 'build')
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
-const png = makePNG(1024, scoutPixel)
-fs.writeFileSync(path.join(outDir, 'icon.png'), png)
+
+const iconPng = makePNG(1024, scoutPixel)
+fs.writeFileSync(path.join(outDir, 'icon.png'), iconPng)
 console.log('✓ build/icon.png generated (1024×1024)')
+
+// macOS template tray icon — 16×16 standard + 32×32 @2x (retina)
+fs.writeFileSync(path.join(outDir, 'trayTemplate.png'),    makePNG(16, trayTemplatePixel))
+fs.writeFileSync(path.join(outDir, 'trayTemplate@2x.png'), makePNG(32, trayTemplatePixel))
+console.log('✓ build/trayTemplate.png + @2x generated (macOS template)')
