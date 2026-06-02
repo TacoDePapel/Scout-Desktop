@@ -2363,8 +2363,33 @@ function agentCredReviewView(session, creds) {
 
 // ---- Boot ----
 
+function paintBootError(err) {
+  try {
+    const root = document.getElementById('app')
+    if (!root) return
+    const msg = String(err && (err.stack || err.message || err) || 'Unknown error')
+    root.innerHTML = ''
+    const d = document.createElement('div')
+    d.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:center;font-family:-apple-system,Segoe UI,sans-serif;color:#FFD69C;'
+    d.innerHTML = `
+      <div style="font-family:'Bebas Neue',Impact,sans-serif;font-size:40px;color:#E4AF7A;letter-spacing:0.05em;">SCOUT</div>
+      <div style="margin-top:18px;font-size:13px;color:#F87171;">Scout couldn't start.</div>
+      <pre style="margin-top:14px;font-size:10px;text-align:left;max-width:420px;max-height:240px;overflow:auto;padding:10px;background:rgba(0,0,0,0.4);border:1px solid rgba(228,175,122,0.18);border-radius:6px;white-space:pre-wrap;">${msg.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</pre>
+    `
+    root.appendChild(d)
+  } catch {}
+}
+
+window.addEventListener('error', e => paintBootError(e.error || e.message))
+window.addEventListener('unhandledrejection', e => paintBootError(e.reason))
+
 void (async () => {
-  render()
+  try {
+    render()
+  } catch (e) {
+    paintBootError(e)
+    return
+  }
 
   try {
     await Promise.all([
@@ -2376,7 +2401,7 @@ void (async () => {
   }
 
   view = currentUser ? { kind: 'idle', tab: 'record' } : { kind: 'auth', step: 'email', email: '' }
-  render()
+  try { render() } catch (e) { paintBootError(e); return }
 
   // Subscribe to main-process events (agent updates, monitor frames, MCP ready)
   initMainProcessListeners()

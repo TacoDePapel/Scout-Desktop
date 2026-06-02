@@ -7,6 +7,14 @@ const { exec, spawn } = require('child_process')
 // Single-instance guard
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0) }
 
+// Fixes pitch-black windows on some macOS / Linux GPU configs
+// (Apple Silicon + external displays, ProMotion, certain Mesa drivers).
+// The renderer falls back to software compositing — minor perf hit, but
+// the window actually paints.
+if (process.platform === 'darwin' || process.platform === 'linux') {
+  app.disableHardwareAcceleration()
+}
+
 let mainWindow     = null
 let selectedSourceId = null
 let agentBrowser   = null
@@ -637,7 +645,11 @@ function createWindow() {
     minHeight: 620,
     maxWidth: 620,
     title: 'Scout',
-    backgroundColor: '#000000',
+    // Dark brown instead of pure black: if the renderer ever fails to paint
+    // (quarantine xattr blocking asar reads, CDN script timeout, etc.) the
+    // window still looks like Scout instead of a broken pitch-black void.
+    backgroundColor: '#1a1206',
+    show: false,
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
@@ -655,6 +667,44 @@ function createWindow() {
       if (sources[0]) callback({ video: sources[0] })
       else callback({})
     } catch (e) { console.error('desktopCapturer error:', e); callback({}) }
+  })
+
+  // Wait until the renderer has actually painted before revealing the window.
+  // Prevents flash-of-black during first paint.
+  mainWindow.once('ready-to-show', () => { mainWindow.show() })
+
+  // Safety net: if the renderer is still hidden 4s in (renderer crashed,
+  // asar quarantined, etc.), show it anyway so the user can see the fallback
+  // HTML / open DevTools instead of a phantom window.
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  }, 4000)
+
+  // Surface silent loadFile / renderer failures (the #1 cause of "opens black")
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error(`[scout] did-fail-load ${code} ${desc} ${url}`)
+    const safe = String(desc || 'unknown error').replace(/[<>&"']/g, c =>
+      ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c])
+    mainWindow.webContents.loadURL(
+      'data:text/html;charset=utf-8,' + encodeURIComponent(
+        `<!doctype html><meta charset="utf-8"><title>Scout</title>
+         <style>html,body{margin:0;height:100%;background:#1a1206;color:#FFD69C;
+         font:14px -apple-system,Segoe UI,sans-serif;display:flex;flex-direction:column;
+         align-items:center;justify-content:center;text-align:center;padding:24px;}
+         h1{color:#E4AF7A;font:600 24px -apple-system;margin:0 0 12px;}
+         code{background:rgba(228,175,122,0.12);padding:4px 8px;border-radius:4px;
+         color:#FFE8C7;font-family:ui-monospace,Menlo,monospace;font-size:12px;}
+         p{max-width:420px;line-height:1.6;opacity:0.85;}</style>
+         <h1>Scout couldn't load</h1>
+         <p>${safe}</p>
+         <p>On macOS this is usually quarantine. In Terminal:</p>
+         <p><code>xattr -dr com.apple.quarantine /Applications/Scout.app</code></p>`))
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[scout] renderer gone:', details)
   })
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'))
