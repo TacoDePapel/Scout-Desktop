@@ -7,9 +7,13 @@
 
 ## What's New
 
+**June 1, 2026 — v2.1.2**
+- **Friendly download names.** The Releases page now shows plain `Scout Mac.dmg`, `Scout Windows.exe`, `Scout Linux.AppImage`, `Scout Linux.deb` instead of cryptic versioned filenames.
+- **One Mac file for everyone.** The macOS build is now a **universal binary** — same file runs on Apple Silicon and Intel Macs. No more "which chip do I have?" decision.
+
 **June 1, 2026 — v2.1.1**
-- **Public download page.** One short URL works on any device: `tacodepapel.github.io/Scout-Desktop`. Detects your OS (and your Mac's chip on modern browsers) and shows the right download button.
-- **Stable release-asset URLs.** Filenames no longer include the version number — `Scout-mac-arm64.dmg`, `Scout-windows-x64.exe`, etc. — so the landing-page links keep working through every future release.
+- **Public download page.** One short URL works on any device: `tacodepapel.github.io/Scout-Desktop`. Detects your OS and shows the right download button.
+- **Stable release-asset URLs.** Filenames no longer include the version number, so the landing-page links keep working through every future release.
 - **Polished macOS tray icon.** Monochrome template image that auto-tints for the menu bar (white on dark, black on light) instead of the old colored blob.
 - **Renderer-side agent is fully OS-aware** too — no more leftover "PowerShell on Windows" assumptions in the legacy code path.
 
@@ -51,13 +55,14 @@
 
 **Direct links** (stable across versions — `latest` always resolves to the newest release):
 
-| Platform | URL |
+| Platform | File on GitHub Releases |
 |---|---|
-| **macOS — Apple Silicon** (M1/M2/M3/M4) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-arm64.dmg |
-| **macOS — Intel** | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-x64.dmg |
-| **Windows** 10 / 11 (x64) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-windows-x64.exe |
-| **Linux** AppImage (x64) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.AppImage |
-| **Linux** Debian/Ubuntu (x64) | https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.deb |
+| **macOS** (Intel + Apple Silicon, universal) | [Scout Mac.dmg](https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Mac.dmg) |
+| **Windows** 10 / 11 | [Scout Windows.exe](https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Windows.exe) |
+| **Linux** (AppImage) | [Scout Linux.AppImage](https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Linux.AppImage) |
+| **Linux** (Debian/Ubuntu) | [Scout Linux.deb](https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Linux.deb) |
+
+> Scout has no iOS or Android version — it's a desktop app and the underlying tech (Electron) can't target mobile. The Mac build runs on iPhones/iPads through... it doesn't. Use a Mac, PC, or Linux computer.
 
 ### First launch on macOS
 

@@ -108,20 +108,17 @@
   <div class="all-platforms">
     <h3>All downloads</h3>
     <div class="grid">
-      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-arm64.dmg">
-        <span class="os">macOS</span><span class="arch">Apple Silicon · .dmg</span>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Mac.dmg">
+        <span class="os">Scout Mac</span><span class="arch">Universal · .dmg</span>
       </a>
-      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-mac-x64.dmg">
-        <span class="os">macOS</span><span class="arch">Intel · .dmg</span>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Windows.exe">
+        <span class="os">Scout Windows</span><span class="arch">10 / 11 · .exe installer</span>
       </a>
-      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-windows-x64.exe">
-        <span class="os">Windows</span><span class="arch">10 / 11 · .exe installer</span>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Linux.AppImage">
+        <span class="os">Scout Linux</span><span class="arch">AppImage</span>
       </a>
-      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.AppImage">
-        <span class="os">Linux</span><span class="arch">x64 · AppImage</span>
-      </a>
-      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout-linux-x64.deb">
-        <span class="os">Linux</span><span class="arch">Debian / Ubuntu · .deb</span>
+      <a href="https://github.com/TacoDePapel/Scout-Desktop/releases/latest/download/Scout%20Linux.deb">
+        <span class="os">Scout Linux</span><span class="arch">Debian / Ubuntu · .deb</span>
       </a>
     </div>
   </div>
@@ -182,17 +179,6 @@
   else if (/Android/i.test(ua))                              os = 'android';
   else if (/iPhone|iPad/i.test(ua))                          os = 'ios';
 
-  // ---- Arch detection (best effort) ----
-  let arch = 'x64';
-  let archKnown = false;
-  try {
-    if (os === 'mac' && navigator.userAgentData?.getHighEntropyValues) {
-      const v = await navigator.userAgentData.getHighEntropyValues(['architecture']);
-      if (v.architecture === 'arm') { arch = 'arm64'; archKnown = true; }
-      else if (v.architecture === 'x86') { arch = 'x64'; archKnown = true; }
-    }
-  } catch {}
-
   // ---- Try to fetch latest version (decorative) ----
   try {
     const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
@@ -213,32 +199,21 @@
 
   if (os === 'mac') {
     noteMac.style.display = 'block';
-    if (archKnown && arch === 'arm64') {
-      detectedEl.innerHTML = `Detected: <b>macOS · Apple Silicon</b>`;
-      primaryEl.append(btn('Download Scout for Mac (Apple Silicon)', `${BASE}/Scout-mac-arm64.dmg`));
-      primaryEl.append(btn('Intel version', `${BASE}/Scout-mac-x64.dmg`, false));
-    } else if (archKnown && arch === 'x64') {
-      detectedEl.innerHTML = `Detected: <b>macOS · Intel</b>`;
-      primaryEl.append(btn('Download Scout for Mac (Intel)', `${BASE}/Scout-mac-x64.dmg`));
-      primaryEl.append(btn('Apple Silicon version', `${BASE}/Scout-mac-arm64.dmg`, false));
-    } else {
-      detectedEl.innerHTML = `Detected: <b>macOS</b> — pick your chip below`;
-      primaryEl.append(btn('Apple Silicon (M1 / M2 / M3 / M4)', `${BASE}/Scout-mac-arm64.dmg`));
-      primaryEl.append(btn('Intel Mac', `${BASE}/Scout-mac-x64.dmg`, false));
-    }
+    detectedEl.innerHTML = `Detected: <b>macOS</b>`;
+    primaryEl.append(btn('Download Scout for Mac', `${BASE}/Scout%20Mac.dmg`));
   } else if (os === 'windows') {
     detectedEl.innerHTML = `Detected: <b>Windows 10 / 11</b>`;
-    primaryEl.append(btn('Download Scout for Windows', `${BASE}/Scout-windows-x64.exe`));
+    primaryEl.append(btn('Download Scout for Windows', `${BASE}/Scout%20Windows.exe`));
   } else if (os === 'linux') {
     detectedEl.innerHTML = `Detected: <b>Linux</b>`;
-    primaryEl.append(btn('Download AppImage', `${BASE}/Scout-linux-x64.AppImage`));
-    primaryEl.append(btn('Debian / Ubuntu (.deb)', `${BASE}/Scout-linux-x64.deb`, false));
+    primaryEl.append(btn('Download Scout for Linux (AppImage)', `${BASE}/Scout%20Linux.AppImage`));
+    primaryEl.append(btn('Debian / Ubuntu (.deb)', `${BASE}/Scout%20Linux.deb`, false));
   } else if (os === 'android' || os === 'ios') {
-    detectedEl.innerHTML = `Scout is a <b>desktop app</b> — open this page on your Mac, Windows, or Linux computer to install. There is no mobile version yet.`;
+    detectedEl.innerHTML = `Scout is a <b>desktop app</b> — open this page on your Mac, Windows, or Linux computer to install. There's no iPhone, iPad, or Android version.`;
   } else {
     detectedEl.innerHTML = `We couldn't auto-detect your OS. Pick one below.`;
-    primaryEl.append(btn('Mac (Apple Silicon)', `${BASE}/Scout-mac-arm64.dmg`));
-    primaryEl.append(btn('Windows', `${BASE}/Scout-windows-x64.exe`, false));
+    primaryEl.append(btn('Scout for Mac', `${BASE}/Scout%20Mac.dmg`));
+    primaryEl.append(btn('Scout for Windows', `${BASE}/Scout%20Windows.exe`, false));
   }
 })();
 </script>
