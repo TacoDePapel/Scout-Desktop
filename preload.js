@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings:       (key)        => ipcRenderer.invoke('settings:get', key),
   setSettings:       (key, value) => ipcRenderer.invoke('settings:set', key, value),
   saveFile:          (opts)       => ipcRenderer.invoke('save-file', opts),
+  openExternal:      (url)        => ipcRenderer.invoke('shell:open-external', url),
   onHotkeyRecord:    (cb)         => ipcRenderer.on('hotkey-record', cb),
   platform: process.platform,
 

@@ -4,16 +4,15 @@ const fs      = require('fs')
 const os      = require('os')
 const { exec, spawn } = require('child_process')
 
+// Disable hardware acceleration unconditionally. Fixes pitch-black windows on:
+//   - Windows: certain GPU/driver combos that fail to composite
+//   - macOS: Apple Silicon + external displays, ProMotion
+//   - Linux: some Mesa drivers
+// Minor perf hit from software compositing, but the window actually paints.
+app.disableHardwareAcceleration()
+
 // Single-instance guard
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0) }
-
-// Fixes pitch-black windows on some macOS / Linux GPU configs
-// (Apple Silicon + external displays, ProMotion, certain Mesa drivers).
-// The renderer falls back to software compositing — minor perf hit, but
-// the window actually paints.
-if (process.platform === 'darwin' || process.platform === 'linux') {
-  app.disableHardwareAcceleration()
-}
 
 let mainWindow     = null
 let selectedSourceId = null
@@ -682,7 +681,15 @@ function createWindow() {
     }
   }, 4000)
 
-  // Surface silent loadFile / renderer failures (the #1 cause of "opens black")
+  // Pipe renderer console to main stdout so field crashes are visible when Scout
+  // is launched from a terminal (or when stdout is captured).
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    const lvl = ['LOG','WARN','ERR'][level] || 'LOG'
+    process.stdout.write(`[RENDERER ${lvl}] ${sourceId}:${line} ${message}\n`)
+  })
+
+  // Surface silent loadFile / renderer failures (the #1 cause of "opens black"):
+  // replace the broken page with a styled fallback that names the error.
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error(`[scout] did-fail-load ${code} ${desc} ${url}`)
     const safe = String(desc || 'unknown error').replace(/[<>&"']/g, c =>
@@ -705,6 +712,14 @@ function createWindow() {
 
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     console.error('[scout] renderer gone:', details)
+  })
+
+  mainWindow.webContents.on('preload-error', (_e, preloadPath, err) => {
+    process.stdout.write(`[PRELOAD ERROR] ${preloadPath} ${err.stack || err.message}\n`)
+  })
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    process.stdout.write(`[DID-FINISH-LOAD] index.html loaded\n`)
   })
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'))
@@ -733,6 +748,9 @@ ipcMain.handle('set-selected-source', (_, id) => { selectedSourceId = id })
 // Settings
 ipcMain.handle('settings:get', (_, key) => readSettings()[key] ?? null)
 ipcMain.handle('settings:set', (_, key, value) => { const d = readSettings(); d[key] = value; writeSettings(d) })
+
+// Shell — open external URL / mailto in default app
+ipcMain.handle('shell:open-external', (_, url) => { try { shell.openExternal(url); return { ok: true } } catch (e) { return { error: e.message } } })
 
 // File save dialog
 ipcMain.handle('save-file', async (event, { defaultName, buffer, mimeType, extensions }) => {
