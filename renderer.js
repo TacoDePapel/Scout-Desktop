@@ -102,26 +102,34 @@ async function processRecording(rec, extraContext) {
   render()
 
   try {
-    // 1. Insert recording row
-    const { error: insertErr } = await supabase.from('recordings').insert({
-      id:           rec.id,
-      user_id:      currentUser.id,
-      title:        rec.title,
+    // 1. Update the recording row inserted at startRecording (or insert if missing).
+    const { error: updErr } = await supabase.from('recordings').update({
       status:       'uploading',
-      started_at:   rec.started_at,
       ended_at:     new Date().toISOString(),
       duration_ms:  rec.duration_ms,
-      mode:         rec.mode,
-      transcript:   { segments: [] },
-      meta:         { platform: window.electronAPI.platform, ua: navigator.userAgent },
-    })
-    if (insertErr) throw insertErr
+    }).eq('id', rec.id)
+    if (updErr) {
+      // Row might not exist yet (e.g. pre-insert failed). Upsert it.
+      const { error: insertErr } = await supabase.from('recordings').upsert({
+        id:           rec.id,
+        user_id:      currentUser.id,
+        title:        rec.title,
+        status:       'uploading',
+        started_at:   rec.started_at,
+        ended_at:     new Date().toISOString(),
+        duration_ms:  rec.duration_ms,
+        mode:         rec.mode,
+        transcript:   { segments: [] },
+        meta:         { platform: window.electronAPI.platform, ua: navigator.userAgent },
+      })
+      if (insertErr) throw insertErr
+    }
 
     // 2. Upload audio blob
     const audioPath = `${currentUser.id}/${rec.id}.webm`
     const { error: uploadErr } = await supabase.storage
       .from('audio')
-      .upload(audioPath, rec._blob, { contentType: 'video/webm', upsert: true })
+      .upload(audioPath, rec._blob, { contentType: rec._isAudioOnly ? 'audio/webm' : 'video/webm', upsert: true })
     if (uploadErr) throw uploadErr
 
     await supabase.from('recordings').update({ audio_path: audioPath, status: 'transcribing' }).eq('id', rec.id)
@@ -129,15 +137,23 @@ async function processRecording(rec, extraContext) {
     view = { kind: 'processing', recording: rec, stage: 'transcribing', error: null }
     render()
 
-    // 3. Transcribe
-    const txRes = await fetch(`${SUPABASE_URL}/functions/v1/transcribe`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body:    JSON.stringify({ recording_id: rec.id }),
-    })
-    if (!txRes.ok) {
-      const body = await txRes.json().catch(() => ({}))
-      throw new Error(body.error || `Transcription failed (${txRes.status})`)
+    // 3. Transcribe — prefer the Web Speech transcript captured live in the
+    //    renderer; fall back to the /transcribe edge function (which currently
+    //    returns empty because Claude doesn't natively transcribe webm).
+    const speechText = (rec._speechTranscript || '').trim()
+    if (speechText) {
+      const segments = [{ start_ms: 0, end_ms: rec.duration_ms || 0, text: speechText }]
+      await supabase.from('recordings').update({ transcript: { segments }, status: 'ready' }).eq('id', rec.id)
+    } else {
+      const txRes = await fetch(`${SUPABASE_URL}/functions/v1/transcribe`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ recording_id: rec.id }),
+      })
+      if (!txRes.ok) {
+        const body = await txRes.json().catch(() => ({}))
+        throw new Error(body.error || `Transcription failed (${txRes.status})`)
+      }
     }
 
     view = { kind: 'processing', recording: rec, stage: 'drafting', error: null }
@@ -639,11 +655,11 @@ function recordTab() {
 
   d.innerHTML = `
     <div style="position:relative;display:flex;align-items:center;justify-content:center;width:140px;height:140px;">
-      <div class="record-ring-pulse" style="position:absolute;inset:0;border:1.5px solid rgba(182,128,57,0.28);border-radius:50%;"></div>
-      <div class="record-ring-pulse-delay" style="position:absolute;inset:0;border:1px solid rgba(182,128,57,0.16);border-radius:50%;"></div>
-      <div style="position:absolute;inset:-10px;border:1px solid rgba(182,128,57,0.12);border-radius:50%;"></div>
+      <div class="record-ring-pulse" style="position:absolute;inset:0;border:1.5px solid rgba(182,128,57,0.28);border-radius:50%;pointer-events:none;"></div>
+      <div class="record-ring-pulse-delay" style="position:absolute;inset:0;border:1px solid rgba(182,128,57,0.16);border-radius:50%;pointer-events:none;"></div>
+      <div style="position:absolute;inset:-10px;border:1px solid rgba(182,128,57,0.12);border-radius:50%;pointer-events:none;"></div>
       <button id="rec"
-        style="width:108px;height:108px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#D4924A 0%,#9A6228 55%,#7A4A18 100%);border:1px solid rgba(228,175,122,0.65);box-shadow:0 1px 0 rgba(255,255,255,0.20) inset,0 -2px 0 rgba(0,0,0,0.32) inset,0 10px 40px rgba(182,128,57,0.44);animation:record-btn-idle 3s ease-in-out infinite;cursor:pointer;transition:transform 0.15s;">
+        style="position:relative;z-index:2;width:108px;height:108px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#D4924A 0%,#9A6228 55%,#7A4A18 100%);border:1px solid rgba(228,175,122,0.65);box-shadow:0 1px 0 rgba(255,255,255,0.20) inset,0 -2px 0 rgba(0,0,0,0.32) inset,0 10px 40px rgba(182,128,57,0.44);animation:record-btn-idle 3s ease-in-out infinite;cursor:pointer;transition:transform 0.15s;">
         <span style="display:block;width:36px;height:36px;border-radius:50%;background:linear-gradient(180deg,#2a1506 0%,#1a0e02 100%);box-shadow:0 2px 8px rgba(0,0,0,0.60) inset;"></span>
       </button>
     </div>
@@ -719,35 +735,49 @@ function recordTab() {
   modeSkillBtn.onclick   = async () => { await setSetting('recording_mode', 'skill');       applyMode('skill') }
   modeImproveBtn.onclick = async () => { await setSetting('recording_mode', 'improvement'); applyMode('improvement') }
 
-  d.querySelector('#rec').onclick = startRecording
+  const recBtn = d.querySelector('#rec')
+  if (recBtn) recBtn.onclick = (ev) => { ev.preventDefault(); void startRecording() }
   return d
 }
 
 // ---- Start recording ----
 
 async function startRecording() {
-  const mode       = await getRecordingMode()
-  const micEnabled = await getMicEnabled()
+  const mode = await getRecordingMode()
 
-  const sourceId = await showSourcePickerModal()
-  if (!sourceId) return
-
-  await window.electronAPI.setSelectedSource(sourceId)
+  // No-friction: auto-pick the primary screen instead of showing a picker.
+  let primaryScreen = null
+  try {
+    const sources = await window.electronAPI.getSources()
+    primaryScreen = (sources || []).find(s => /^screen:/.test(s.id)) || (sources || [])[0]
+  } catch (e) { console.warn('[REC] getSources failed:', e) }
+  if (!primaryScreen) { alert("Scout couldn't find a screen to record."); return }
+  await window.electronAPI.setSelectedSource(primaryScreen.id)
 
   let screenStream
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
-  } catch (e) {
-    console.error('Screen capture failed:', e)
-    return
-  }
+  } catch (e) { console.error('Screen capture failed:', e); return }
 
+  // No-friction: always try mic. If denied at OS level, recording continues without it.
   let micStream = null
-  if (micEnabled) {
-    try { micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) }
-    catch (e) { console.warn('Mic unavailable:', e) }
+  try { micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) }
+  catch (e) { console.warn('Mic unavailable:', e) }
+
+  // Audio-only recorder — what we actually upload for transcription. Smaller,
+  // valid for Anthropic's audio document input, no 500s from huge video.
+  let audioRecorder = null, audioChunks = []
+  if (micStream && micStream.getAudioTracks().length > 0) {
+    const audioOnly = new MediaStream(micStream.getAudioTracks())
+    const mimeAudio = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+    try {
+      audioRecorder = new MediaRecorder(audioOnly, { mimeType: mimeAudio })
+      audioRecorder.ondataavailable = e => { if (e.data?.size > 0) audioChunks.push(e.data) }
+      audioRecorder.start(5000)
+    } catch (e) { console.warn('[REC] audio-only recorder failed:', e); audioRecorder = null }
   }
 
+  // Combined recorder — kept for archival / future video features.
   const tracks   = [...screenStream.getVideoTracks(), ...(micStream ? micStream.getAudioTracks() : [])]
   const combined = new MediaStream(tracks)
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm'
@@ -763,16 +793,39 @@ async function startRecording() {
       started_at:   Date.now(),
       paused_ms:    0,
       is_paused:    false,
-      mic_enabled:  micEnabled,
-      audio_supported: micStream !== null,
+      mic_enabled:     !!micStream,
+      audio_supported: !!micStream,
       mode,
       live_transcript: '',
       coach_ask_count: 0,
       _chunkRecorder:  null,
       _coachInterval:  null,
-      _recorder: recorder, _chunks: chunks, _screenStream: screenStream, _micStream: micStream,
+      _speechRec:      null,
+      _recorder: recorder, _chunks: chunks,
+      _audioRecorder: audioRecorder, _audioChunks: audioChunks,
+      _screenStream: screenStream, _micStream: micStream,
     },
   }
+  view.state._speechRec = startSpeechRecognition()
+
+  // Insert the recording row up front so screenshot events can FK-reference it.
+  // Status starts as 'recording' and is updated on stop.
+  if (supabase && currentUser) {
+    try {
+      const { error: pre } = await supabase.from('recordings').insert({
+        id:           view.state.recording_id,
+        user_id:      currentUser.id,
+        title:        'Recording',
+        status:       'recording',
+        started_at:   new Date(view.state.started_at).toISOString(),
+        mode,
+        transcript:   { segments: [] },
+        meta:         { platform: window.electronAPI.platform, ua: navigator.userAgent },
+      })
+      if (pre) console.warn('[REC] pre-insert recording row failed:', pre.message)
+    } catch (e) { console.warn('[REC] pre-insert threw:', e) }
+  }
+  startScreenshotLoop(screenStream, view.state.recording_id)
 
   screenStream.getVideoTracks()[0].addEventListener('ended', () => {
     if (view.kind === 'recording') void doStopRecording()
@@ -789,7 +842,7 @@ async function startRecording() {
 
 async function doStopRecording() {
   if (view.kind !== 'recording') return
-  const { _recorder, _chunks, _screenStream, _micStream, recording_id, started_at, paused_ms, mode } = view.state
+  const { _recorder, _chunks, _audioRecorder, _audioChunks, _screenStream, _micStream, recording_id, started_at, paused_ms, mode } = view.state
 
   stopRecordingLoops()
   void window.electronAPI.overlayHide?.()
@@ -801,7 +854,15 @@ async function doStopRecording() {
     if (_recorder.state !== 'inactive') _recorder.stop()
   })
 
-  const blob     = new Blob(_chunks, { type: 'video/webm' })
+  let audioBlob = null
+  if (_audioRecorder) {
+    await new Promise(resolve => {
+      _audioRecorder.onstop = resolve
+      if (_audioRecorder.state !== 'inactive') _audioRecorder.stop()
+    })
+    if (_audioChunks.length > 0) audioBlob = new Blob(_audioChunks, { type: 'audio/webm' })
+  }
+
   const duration = Date.now() - started_at - (paused_ms || 0)
 
   const rec = {
@@ -813,11 +874,111 @@ async function doStopRecording() {
     mode,
     transcript:  { segments: [] },
     skills:      [],
-    _blob:       blob,
+    // Prefer the audio-only blob for upload; falls back to combined webm.
+    _blob:       audioBlob || new Blob(_chunks, { type: 'video/webm' }),
+    _isAudioOnly: !!audioBlob,
+    _speechTranscript: view.state.live_transcript || '',
   }
 
-  view = { kind: 'extra_context', recording: rec }
-  render()
+  // No-friction: skip the extra_context step. Auto-generate skill.
+  void processRecording(rec)
+}
+
+// ---- Screenshot loop (sample frames from the screen stream → screenshots bucket) ----
+
+function startScreenshotLoop(screenStream, recording_id) {
+  if (!screenStream || !supabase || !currentUser) return
+  const video = document.createElement('video')
+  video.srcObject = screenStream
+  video.muted = true
+  video.playsInline = true
+  void video.play().catch(() => {})
+
+  const canvas = document.createElement('canvas')
+  const ctx    = canvas.getContext('2d')
+
+  const tick = async () => {
+    if (view.kind !== 'recording') return
+    if (view.state.is_paused)      { setTimeout(tick, 1500); return }
+
+    try {
+      const vw = video.videoWidth, vh = video.videoHeight
+      if (vw > 0 && vh > 0) {
+        const w = 960
+        const h = Math.round(w * vh / vw)
+        canvas.width = w; canvas.height = h
+        ctx.drawImage(video, 0, 0, w, h)
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.72))
+        if (blob && view.kind === 'recording') {
+          const ts_ms   = Date.now() - view.state.started_at
+          const eventId = (crypto.randomUUID ? crypto.randomUUID() : ('e-' + Date.now()))
+          const path    = `${currentUser.id}/${recording_id}/${eventId}.jpg`
+          try {
+            const up = await supabase.storage.from('screenshots').upload(path, blob, { contentType: 'image/jpeg', upsert: false })
+            if (!up.error) {
+              await supabase.from('events').insert({
+                recording_id, user_id: currentUser.id, ts_ms,
+                kind: 'screenshot', data: {}, screenshot_path: path,
+              })
+            }
+          } catch (e) { console.warn('[shot] upload/insert failed:', e) }
+        }
+      }
+    } catch (e) { console.warn('[shot] tick error:', e) }
+
+    if (view.kind === 'recording') setTimeout(tick, 5000)
+  }
+  setTimeout(tick, 1200) // first capture after a beat so video has actual frames
+}
+
+// ---- Native Web Speech transcription (free, no API key, runs in renderer) ----
+
+function startSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!SR) { console.warn('[SR] SpeechRecognition not available in this Electron build'); return null }
+  let rec
+  try { rec = new SR() } catch (e) { console.warn('[SR] constructor failed:', e); return null }
+  rec.continuous     = true
+  rec.interimResults = true
+  rec.lang           = navigator.language || 'en-US'
+  rec.onresult = (event) => {
+    if (view.kind !== 'recording') return
+    let appended = false
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const r = event.results[i]
+      if (r.isFinal) {
+        const text = (r[0]?.transcript || '').trim()
+        if (text) {
+          view.state.live_transcript = (view.state.live_transcript ? view.state.live_transcript + ' ' : '') + text
+          appended = true
+        }
+      }
+    }
+    if (appended) {
+      const el = document.getElementById('live-transcript')
+      if (el) { el.textContent = view.state.live_transcript; el.scrollTop = el.scrollHeight }
+    }
+  }
+  let dead = false
+  rec.onerror = (e) => {
+    const err = e?.error || String(e)
+    console.warn('[SR] error:', err)
+    // network / not-allowed / service-not-allowed are fatal in Electron — Google
+    // removed public Web Speech endpoint, so the underlying transport can't connect.
+    // Stop retrying so we don't spam logs every 50 ms.
+    if (err === 'network' || err === 'not-allowed' || err === 'service-not-allowed' || err === 'aborted') {
+      dead = true
+      try { rec.onend = null; rec.stop() } catch {}
+    }
+  }
+  rec.onend = () => {
+    if (dead) return
+    if (view.kind === 'recording' && !view.state.is_paused) {
+      try { rec.start() } catch (e) { /* already started or permission denied */ }
+    }
+  }
+  try { rec.start(); console.log('[SR] started') } catch (e) { console.warn('[SR] start failed:', e); return null }
+  return rec
 }
 
 // ---- Live transcription (chunks every ~5s while recording) ----
@@ -934,6 +1095,10 @@ function stopRecordingLoops() {
   if (view.kind !== 'recording') return
   try { if (view.state._chunkRecorder && view.state._chunkRecorder.state !== 'inactive') view.state._chunkRecorder.stop() } catch {}
   if (view.state._coachInterval) { clearInterval(view.state._coachInterval); view.state._coachInterval = null }
+  if (view.state._speechRec) {
+    try { view.state._speechRec.onend = null; view.state._speechRec.stop() } catch {}
+    view.state._speechRec = null
+  }
   const t = document.getElementById('coach-toast'); if (t) t.remove()
 }
 
@@ -1370,12 +1535,30 @@ function skillView(rec, skill, allSkills) {
       </div>`
   } else {
     actions.innerHTML = `
-      <button id="cc-copy" class="btn btn-primary" style="width:100%;">Copy for Claude Code — use right now</button>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button id="run-skill" class="btn btn-primary" style="width:100%;font-size:14px;padding:12px 16px;">✦ Run automatically</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        <button id="cc-copy" class="btn" style="font-size:11px;">Copy for AI</button>
         <button id="cp" class="btn" style="font-size:11px;">Copy raw</button>
         <button id="dl" class="btn" style="font-size:11px;">Save .md</button>
       </div>`
   }
+
+  // ✦ Run automatically — hand the skill to the background agent
+  actions.querySelector('#run-skill')?.addEventListener('click', async () => {
+    const btn = actions.querySelector('#run-skill')
+    btn.disabled = true; btn.textContent = 'Starting agent…'
+    const task = `You are executing a previously-recorded workflow as an autonomous agent. The user has already approved this skill — do not ask for confirmation, just complete it end-to-end. Use bash, browser_open / browser_action, read_file / write_file, and any MCP tools available. If a step requires a credential or input the skill doesn't name, make a best-effort guess and proceed; report what you guessed at the end.\n\nWhen done, summarise: what files / URLs you touched, the final result, and anything you skipped or guessed.\n\n--- SKILL ---\n\n${skill.body_md.trim()}\n\n--- END SKILL ---`
+    try {
+      const { error } = await window.electronAPI.startAgentBg({ task, token: SUPABASE_ANON_KEY })
+      if (error) { alert('Agent failed to start: ' + error); btn.disabled = false; btn.textContent = '✦ Run automatically'; return }
+      bgAgentSteps = []; bgAgentTask = (skill.title || 'Run skill') + ' — auto-execution'; bgAgentRunning = true
+      view = { kind: 'agent-bg-running' }
+      render()
+    } catch (e) {
+      alert('Could not start agent: ' + (e.message || e))
+      btn.disabled = false; btn.textContent = '✦ Run automatically'
+    }
+  })
 
   actions.querySelector('#cc-copy').onclick = async () => {
     const btn  = actions.querySelector('#cc-copy')
