@@ -1,6 +1,6 @@
 {
   "name": "scout-desktop",
-  "version": "2.1.8",
+  "version": "2.1.9",
   "description": "Scout — AI workflow capture by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
@@ -68,7 +68,13 @@
     },
     "dmg": {
       "title": "Scout ${version}",
-      "writeUpdateInfo": false
+      "writeUpdateInfo": false,
+      "window": { "width": 540, "height": 480 },
+      "contents": [
+        { "x": 140, "y": 200, "type": "file" },
+        { "x": 400, "y": 200, "type": "link", "path": "/Applications" },
+        { "x": 270, "y": 360, "type": "file", "path": "build/install-helper/Open me first.command" }
+      ]
     },
     "linux": {
       "target": [
