@@ -180,7 +180,7 @@ function getMCPStatus() {
 // BACKGROUND AGENT
 // ================================================================
 
-const SUPABASE_URL = 'https://wmicxsafqbixedpjhchc.supabase.co'
+const SUPABASE_URL = 'https://fzcssialkdybftxmpmhm.supabase.co'
 
 // ---- Platform-aware shell ----
 const IS_WIN = process.platform === 'win32'

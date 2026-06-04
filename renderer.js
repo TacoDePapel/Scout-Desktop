@@ -1,5 +1,9 @@
 // Scout Desktop — renderer.js v1.0.0
 
+// IIFE wraps the whole file so `let supabase` doesn't collide with the
+// global `var supabase` exported by vendor/supabase.min.js (UMD).
+;(() => {
+
 // ---- Platform ----
 
 const PLATFORM = (() => {
@@ -37,8 +41,8 @@ async function getRecordingMode() {
 
 // ---- Supabase ----
 
-const SUPABASE_URL      = 'https://wmicxsafqbixedpjhchc.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtaWN4c2FmcWJpeGVkcGpoY2hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2OTYyNjEsImV4cCI6MjA5MzI3MjI2MX0.sDw4CoqdmS5CvoRThd1bn1lzCH8Lp5_mRXzI0T3gZ1A'
+const SUPABASE_URL      = 'https://fzcssialkdybftxmpmhm.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6Y3NzaWFsa2R5YmZ0eG1wbWhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMjY3ODcsImV4cCI6MjA5MjkwMjc4N30.DS0UxNbPmBBoMiVeGvQ2S81QOzjsLATq5mA4vFdfpm4'
 
 let supabase    = null
 let currentUser = null
@@ -46,28 +50,12 @@ let currentUser = null
 async function initSupabase() {
   if (!window.supabase) return
   supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: true },
+    auth: { persistSession: false, autoRefreshToken: false },
   })
-  const saved = await getSetting('supabase_session', null)
-  if (saved?.access_token) {
-    const { data, error } = await supabase.auth.setSession(saved)
-    if (!error && data.user) {
-      currentUser = data.user
-    } else {
-      await setSetting('supabase_session', null)
-    }
-  }
-  supabase.auth.onAuthStateChange(async (_event, session) => {
-    currentUser = session?.user ?? null
-    if (session) {
-      await setSetting('supabase_session', {
-        access_token:  session.access_token,
-        refresh_token: session.refresh_token,
-      })
-    } else {
-      await setSetting('supabase_session', null)
-    }
-  })
+  // No-auth mode: fixed local user UUID. Matches the placeholder returned by
+  // verifyAuthUser() in the edge functions when called with the anon key, so
+  // their `.eq("user_id", user.id)` queries find the rows this client wrote.
+  currentUser = { id: '00000000-0000-0000-0000-000000000001', email: 'local@scout' }
 }
 
 async function doSignOut() {
@@ -103,7 +91,7 @@ async function processRecording(rec, extraContext) {
   }
 
   const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData?.session?.access_token
+  const token = SUPABASE_ANON_KEY
   if (!token) {
     view = { kind: 'idle', tab: 'library' }
     render()
@@ -203,7 +191,8 @@ async function processRecording(rec, extraContext) {
 
     if (finalSkill) {
       const title = finalSkill.title || rec.title
-      await supabase.from('recordings').update({ title, status: 'ready' }).eq('id', rec.id).catch(() => {})
+      // PostgrestBuilder is thenable but doesn't expose `.catch` — wrap.
+      try { await supabase.from('recordings').update({ title, status: 'ready' }).eq('id', rec.id) } catch (_) { /* non-critical */ }
       const updatedRec = { ...rec, title, status: 'ready', skills: allSkills }
       const primary    = allSkills.find(s => (s.kind ?? 'skill') === (rec.mode ?? 'skill')) ?? allSkills[0]
       view = { kind: 'skill', recording: updatedRec, skill: primary, allSkills }
@@ -1463,7 +1452,7 @@ let agentSession = null
 async function runAgent(task) {
   if (!supabase || !currentUser) return
   const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData?.session?.access_token
+  const token = SUPABASE_ANON_KEY
   if (!token) return
 
   agentSession = {
@@ -1687,7 +1676,7 @@ function toolIcon(tool) {
 async function detectAndOfferCredentials() {
   if (!agentSession?.messages?.length) return
   const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData?.session?.access_token
+  const token = SUPABASE_ANON_KEY
   if (!token) return
 
   const transcript = agentSession.messages
@@ -1745,7 +1734,7 @@ async function detectAndOfferCredentials() {
 async function generateSkillFromAgentSession() {
   if (!agentSession || !supabase || !currentUser) return
   const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData?.session?.access_token
+  const token = SUPABASE_ANON_KEY
   if (!token) return
 
   const transcript = agentSession.messages.map(m => {
@@ -1896,7 +1885,7 @@ async function generateSkillFromBgSession() {
   if (!transcript.trim()) return
 
   const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData?.session?.access_token
+  const token = SUPABASE_ANON_KEY
   if (!token) return
 
   const recId = crypto.randomUUID()
@@ -2033,7 +2022,7 @@ function agentTab() {
     if (!task) return
     if (!supabase || !currentUser) return
     const { data: sessionData } = await supabase.auth.getSession()
-    const token = sessionData?.session?.access_token
+    const token = SUPABASE_ANON_KEY
     if (!token) return
     const { error } = await window.electronAPI.startAgentBg({ task, token })
     if (error) { alert(error); return }
@@ -2400,7 +2389,8 @@ void (async () => {
     console.error('Boot error:', e)
   }
 
-  view = currentUser ? { kind: 'idle', tab: 'record' } : { kind: 'auth', step: 'email', email: '' }
+  // No-auth mode — initSupabase always produces a currentUser; never show auth UI.
+  view = { kind: 'idle', tab: 'record' }
   try { render() } catch (e) { paintBootError(e); return }
 
   // Subscribe to main-process events (agent updates, monitor frames, MCP ready)
@@ -2422,4 +2412,6 @@ void (async () => {
       setTimeout(() => startRecording(), 80)
     }
   })
+})()
+
 })()
