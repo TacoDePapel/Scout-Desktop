@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Scout</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; background: transparent;
+    -webkit-app-region: drag; user-select: none;
+    overflow: hidden;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    color: #FFE8C7;
+  }
+  body {
+    width: 240px; height: 56px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 14px; box-sizing: border-box;
+    background: rgba(20, 12, 4, 0.92);
+    border: 1px solid rgba(228, 175, 122, 0.45);
+    border-radius: 16px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+    backdrop-filter: blur(20px);
+  }
+  #dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 10px rgba(239,68,68,0.65);
+    animation: dotpulse 1.4s ease infinite;
+    flex-shrink: 0;
+  }
+  @keyframes dotpulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%     { opacity: 0.5; transform: scale(0.85); }
+  }
+  #timer {
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+    font-size: 16px; letter-spacing: 0.04em;
+    flex: 1; font-variant-numeric: tabular-nums;
+  }
+  button {
+    -webkit-app-region: no-drag;
+    background: rgba(228, 175, 122, 0.18);
+    border: 1px solid rgba(228, 175, 122, 0.32);
+    color: #FFE8C7;
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 11px; font-family: inherit;
+    cursor: pointer;
+  }
+  button.stop {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.42);
+    color: #FFB0B0;
+  }
+  button:hover { filter: brightness(1.2); }
+</style>
+</head>
+<body>
+  <div id="dot" title="Recording"></div>
+  <div id="timer">00:00</div>
+  <button id="pause">Pause</button>
+  <button class="stop" id="stop">Stop</button>
+  <script>
+    const { ipcRenderer } = require('electron')
+    let startedAt = Date.now()
+    let paused = false
+    let pausedMs = 0
+    let pauseStart = 0
+
+    ipcRenderer.on('overlay:set-start', (_e, ts) => { if (typeof ts === 'number') startedAt = ts })
+
+    setInterval(() => {
+      if (paused) return
+      const ms = Math.max(0, Date.now() - startedAt - pausedMs)
+      const sec = Math.floor(ms / 1000) % 60
+      const min = Math.floor(ms / 60000)
+      const t = String(min).padStart(2, '0') + ':' + String(sec).padStart(2, '0')
+      const el = document.getElementById('timer')
+      if (el) el.textContent = t
+    }, 250)
+
+    document.getElementById('pause').onclick = () => {
+      paused = !paused
+      if (paused) { pauseStart = Date.now(); document.getElementById('pause').textContent = 'Resume' }
+      else        { pausedMs += Date.now() - pauseStart; document.getElementById('pause').textContent = 'Pause' }
+      ipcRenderer.send('overlay:pause')
+    }
+    document.getElementById('stop').onclick = () => { ipcRenderer.send('overlay:stop') }
+  </script>
+</body>
+</html>

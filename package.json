@@ -1,6 +1,6 @@
 {
   "name": "scout-desktop",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "Scout — AI workflow capture by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
@@ -26,6 +26,7 @@
       "preload.js",
       "renderer.js",
       "index.html",
+      "overlay.html",
       "app.css",
       "vendor/**/*",
       "build/icon.png",

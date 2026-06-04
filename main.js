@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, shell, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, shell, safeStorage, Tray, Menu, nativeImage, Notification, screen } = require('electron')
 const path    = require('path')
 const fs      = require('fs')
 const os      = require('os')
@@ -751,6 +751,42 @@ ipcMain.handle('settings:set', (_, key, value) => { const d = readSettings(); d[
 
 // Shell — open external URL / mailto in default app
 ipcMain.handle('shell:open-external', (_, url) => { try { shell.openExternal(url); return { ok: true } } catch (e) { return { error: e.message } } })
+
+// Floating recording overlay (transparent, always-on-top control bar)
+let overlayWindow = null
+function showOverlay(startedAt) {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    try { overlayWindow.webContents.send('overlay:set-start', startedAt) } catch {}
+    overlayWindow.showInactive()
+    return
+  }
+  const primary = screen.getPrimaryDisplay()
+  const width = 240, height = 56, margin = 20
+  overlayWindow = new BrowserWindow({
+    width, height,
+    x: primary.workArea.x + primary.workArea.width - width - margin,
+    y: primary.workArea.y + margin,
+    frame: false, transparent: true, alwaysOnTop: true,
+    skipTaskbar: true, resizable: false, hasShadow: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  })
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+  try { overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }) } catch {}
+  overlayWindow.loadFile(path.join(__dirname, 'overlay.html'))
+  overlayWindow.once('ready-to-show', () => {
+    try { overlayWindow.webContents.send('overlay:set-start', startedAt) } catch {}
+    overlayWindow.showInactive()
+  })
+  overlayWindow.on('closed', () => { overlayWindow = null })
+}
+function hideOverlay() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy()
+  overlayWindow = null
+}
+ipcMain.handle('overlay:show', (_e, opts) => { showOverlay(opts?.startedAt ?? Date.now()); return { ok: true } })
+ipcMain.handle('overlay:hide', () => { hideOverlay(); return { ok: true } })
+ipcMain.on('overlay:stop',  () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('overlay:stop') })
+ipcMain.on('overlay:pause', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('overlay:pause') })
 
 // File save dialog
 ipcMain.handle('save-file', async (event, { defaultName, buffer, mimeType, extensions }) => {

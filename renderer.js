@@ -766,6 +766,10 @@ async function startRecording() {
       mic_enabled:  micEnabled,
       audio_supported: micStream !== null,
       mode,
+      live_transcript: '',
+      coach_ask_count: 0,
+      _chunkRecorder:  null,
+      _coachInterval:  null,
       _recorder: recorder, _chunks: chunks, _screenStream: screenStream, _micStream: micStream,
     },
   }
@@ -773,6 +777,10 @@ async function startRecording() {
   screenStream.getVideoTracks()[0].addEventListener('ended', () => {
     if (view.kind === 'recording') void doStopRecording()
   })
+
+  if (micStream) startChunkLoop(micStream, view.state.recording_id)
+  startCoachLoop(view.state.recording_id)
+  void window.electronAPI.overlayShow?.({ startedAt: view.state.started_at })
 
   render()
 }
@@ -783,6 +791,8 @@ async function doStopRecording() {
   if (view.kind !== 'recording') return
   const { _recorder, _chunks, _screenStream, _micStream, recording_id, started_at, paused_ms, mode } = view.state
 
+  stopRecordingLoops()
+  void window.electronAPI.overlayHide?.()
   _screenStream?.getTracks().forEach(t => t.stop())
   _micStream?.getTracks().forEach(t => t.stop())
 
@@ -808,6 +818,123 @@ async function doStopRecording() {
 
   view = { kind: 'extra_context', recording: rec }
   render()
+}
+
+// ---- Live transcription (chunks every ~5s while recording) ----
+
+async function dispatchChunk(blob, recording_id) {
+  if (!blob || blob.size < 2000) return
+  try {
+    const buf = await blob.arrayBuffer()
+    let s = ''
+    const bytes = new Uint8Array(buf)
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i])
+    const b64 = btoa(s)
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/transcribe-chunk`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body:    JSON.stringify({ audio_base64: b64, mime_type: 'audio/webm', recording_id }),
+    })
+    const json = await res.json().catch(() => ({}))
+    const text = (json.text || '').trim()
+    if (text && view.kind === 'recording') {
+      view.state.live_transcript = (view.state.live_transcript ? view.state.live_transcript + ' ' : '') + text
+      const el = document.getElementById('live-transcript')
+      if (el) { el.textContent = view.state.live_transcript; el.scrollTop = el.scrollHeight }
+    }
+  } catch (e) { console.warn('[chunk] transcribe failed', e) }
+}
+
+function startChunkLoop(micStream, recording_id) {
+  if (!micStream || micStream.getAudioTracks().length === 0) return
+  const audioOnly = new MediaStream(micStream.getAudioTracks())
+  const tick = () => {
+    if (view.kind !== 'recording') return
+    if (view.state.is_paused) { setTimeout(tick, 1500); return }
+    const localChunks = []
+    let rec
+    try { rec = new MediaRecorder(audioOnly, { mimeType: 'audio/webm;codecs=opus' }) }
+    catch { try { rec = new MediaRecorder(audioOnly) } catch { return } }
+    rec.ondataavailable = e => { if (e.data?.size > 0) localChunks.push(e.data) }
+    rec.onstop = () => {
+      const blob = new Blob(localChunks, { type: 'audio/webm' })
+      void dispatchChunk(blob, recording_id)
+      if (view.kind === 'recording') setTimeout(tick, 100)
+    }
+    try { rec.start() } catch { return }
+    view.state._chunkRecorder = rec
+    setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop() } catch {} }, 5000)
+  }
+  tick()
+}
+
+// ---- Coach polling (every 30s while recording) ----
+
+function startCoachLoop(recording_id) {
+  const interval = setInterval(async () => {
+    if (view.kind !== 'recording') { clearInterval(interval); return }
+    if (view.state.is_paused) return
+    const tail = (view.state.live_transcript || '').slice(-1500)
+    const askCount = view.state.coach_ask_count || 0
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/coach`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+        body:    JSON.stringify({ events: [], transcript_tail: tail, ask_count: askCount, current_url: null, current_title: null }),
+      })
+      const json = await res.json().catch(() => ({ ask: null }))
+      const ask = json.ask
+      if (ask && view.kind === 'recording') {
+        view.state.coach_ask_count = askCount + 1
+        const asked_at_ms = Date.now() - view.state.started_at
+        showCoachToast(ask, recording_id, asked_at_ms)
+        if (supabase) {
+          try { await supabase.from('coach_log').insert({ recording_id, asked_at_ms, ask_text: ask }) }
+          catch (e) { console.warn('[coach] log insert failed', e) }
+        }
+      }
+    } catch (e) { console.warn('[coach] poll failed', e) }
+  }, 30000)
+  view.state._coachInterval = interval
+}
+
+function showCoachToast(ask, recording_id, asked_at_ms) {
+  const existing = document.getElementById('coach-toast')
+  if (existing) existing.remove()
+  const toast = document.createElement('div')
+  toast.id = 'coach-toast'
+  toast.style.cssText = 'position:fixed;top:14px;left:14px;right:14px;background:rgba(20,12,4,0.95);border:1px solid rgba(228,175,122,0.45);border-radius:8px;padding:14px;z-index:9999;box-shadow:0 4px 24px rgba(0,0,0,0.55);backdrop-filter:blur(12px);font-family:-apple-system,Segoe UI,sans-serif;'
+  const safe = String(ask).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]))
+  toast.innerHTML = `
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#E4AF7A;margin-bottom:6px;">Coach asks</div>
+    <div style="font-size:13px;color:#FFE8C7;line-height:1.4;margin-bottom:10px;">${safe}</div>
+    <div style="display:flex;gap:6px;">
+      <input id="ct-reply" type="text" placeholder="Type a quick answer..." style="flex:1;background:rgba(0,0,0,0.4);border:1px solid rgba(228,175,122,0.25);border-radius:4px;padding:6px 8px;font-size:12px;color:#FFE8C7;outline:none;font-family:inherit;" />
+      <button id="ct-skip" style="background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,232,199,0.5);border-radius:4px;padding:6px 10px;font-size:11px;cursor:pointer;font-family:inherit;">skip</button>
+    </div>
+  `
+  document.body.appendChild(toast)
+  const input = toast.querySelector('#ct-reply')
+  const close = () => { try { toast.remove() } catch {} }
+  toast.querySelector('#ct-skip').onclick = close
+  input.onkeydown = async (e) => {
+    if (e.key !== 'Enter') return
+    const reply = input.value.trim()
+    close()
+    if (reply && supabase) {
+      try { await supabase.from('coach_log').update({ reply_transcript: reply }).eq('recording_id', recording_id).eq('asked_at_ms', asked_at_ms) }
+      catch (err) { console.warn('[coach] reply update failed', err) }
+    }
+  }
+  setTimeout(() => input?.focus(), 50)
+  setTimeout(close, 25000)
+}
+
+function stopRecordingLoops() {
+  if (view.kind !== 'recording') return
+  try { if (view.state._chunkRecorder && view.state._chunkRecorder.state !== 'inactive') view.state._chunkRecorder.stop() } catch {}
+  if (view.state._coachInterval) { clearInterval(view.state._coachInterval); view.state._coachInterval = null }
+  const t = document.getElementById('coach-toast'); if (t) t.remove()
 }
 
 // ---- Recording view ----
@@ -839,9 +966,12 @@ function recordingView(s) {
     </div>
     <button id="discard" class="btn" style="width:100%;color:rgba(239,68,68,0.75);border-color:rgba(239,68,68,0.30);font-size:11px;">Cancel recording</button>
 
-    <div class="glass" style="padding:12px;">
-      <div class="label" style="font-size:8px;margin-bottom:4px;">Tip</div>
-      <div id="tip-text" style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);transition:opacity 0.4s;"></div>
+    <div class="glass" style="padding:12px;max-height:180px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="label" style="font-size:8px;">Live transcript</div>
+        <div style="font-size:8px;letter-spacing:0.10em;color:rgba(228,175,122,0.40);text-transform:uppercase;">${s.mic_enabled && s.audio_supported ? 'listening' : 'mic off'}</div>
+      </div>
+      <div id="live-transcript" style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.65);overflow-y:auto;flex:1;min-height:40px;max-height:140px;">${(s.live_transcript || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])) || '<span style="color:rgba(255,232,199,0.25);">Say something — it will appear here within ~5s…</span>'}</div>
     </div>
   `
 
@@ -856,17 +986,7 @@ function recordingView(s) {
     tEl.textContent = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
   }, 500)
 
-  const TIPS = s.mode === 'improvement'
-    ? ["Say what you expected, then show what actually happened.", "Name the component — \"This button on the Leads table doesn't…\"", "Show error messages or loading states you think are wrong.", "Narrate impact — \"This makes it impossible to submit.\""]
-    : ["Say what you're doing as you do it.", "Mention the why — \"We always skip this field for EU contacts\".", "Note exceptions — \"If it's red, it needs approval first\".", "Call out decision points — \"Here I check if the total is over $500\"."]
-  let tipIdx = 0
-  const tipEl = d.querySelector('#tip-text')
-  tipEl.textContent = TIPS[0]; tipIdx = 1
-  const tipInterval = setInterval(() => {
-    if (!d.isConnected) { clearInterval(tipInterval); return }
-    tipEl.style.opacity = '0'
-    setTimeout(() => { if (d.isConnected) { tipEl.textContent = TIPS[tipIdx % TIPS.length]; tipEl.style.opacity = '1'; tipIdx++ } }, 400)
-  }, 7000)
+  const tipInterval = null  // tips replaced by live transcript pane
 
   d.querySelector('#pause').onclick = () => {
     view.state.is_paused = !view.state.is_paused
@@ -876,7 +996,7 @@ function recordingView(s) {
   }
 
   d.querySelector('#stop').onclick = async () => {
-    clearInterval(timerInterval); clearInterval(tipInterval)
+    clearInterval(timerInterval)
     await doStopRecording()
   }
 
@@ -888,7 +1008,9 @@ function recordingView(s) {
       discardBtn.textContent = 'Tap again to confirm'
       setTimeout(() => { discardConfirming = false; discardBtn.textContent = 'Cancel recording' }, 3000)
     } else {
-      clearInterval(timerInterval); clearInterval(tipInterval)
+      clearInterval(timerInterval)
+      stopRecordingLoops()
+      void window.electronAPI.overlayHide?.()
       view.state._screenStream?.getTracks().forEach(t => t.stop())
       view.state._micStream?.getTracks().forEach(t => t.stop())
       if (view.state._recorder?.state !== 'inactive') view.state._recorder?.stop()
@@ -2411,6 +2533,16 @@ void (async () => {
       if (view.tab !== 'record') { view = { kind: 'idle', tab: 'record' }; render() }
       setTimeout(() => startRecording(), 80)
     }
+  })
+
+  // Floating overlay buttons (always-on-top control bar)
+  window.electronAPI.onOverlayStop?.(() => { if (view.kind === 'recording') void doStopRecording() })
+  window.electronAPI.onOverlayPause?.(() => {
+    if (view.kind !== 'recording' || !view.state._recorder) return
+    view.state.is_paused = !view.state.is_paused
+    if (view.state._recorder.state === 'recording') view.state._recorder.pause()
+    else if (view.state._recorder.state === 'paused') view.state._recorder.resume()
+    render()
   })
 })()
 

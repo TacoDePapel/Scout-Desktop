@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSettings:       (key, value) => ipcRenderer.invoke('settings:set', key, value),
   saveFile:          (opts)       => ipcRenderer.invoke('save-file', opts),
   openExternal:      (url)        => ipcRenderer.invoke('shell:open-external', url),
+  overlayShow:       (opts)       => ipcRenderer.invoke('overlay:show', opts),
+  overlayHide:       ()           => ipcRenderer.invoke('overlay:hide'),
+  onOverlayStop:     (cb)         => ipcRenderer.on('overlay:stop',  () => cb()),
+  onOverlayPause:    (cb)         => ipcRenderer.on('overlay:pause', () => cb()),
   onHotkeyRecord:    (cb)         => ipcRenderer.on('hotkey-record', cb),
   platform: process.platform,
 
