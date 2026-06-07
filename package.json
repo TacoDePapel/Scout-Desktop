@@ -1,7 +1,7 @@
 {
   "name": "scout-desktop",
-  "version": "2.1.9",
-  "description": "Scout — AI workflow capture by Orage AI Agency",
+  "version": "2.2.0",
+  "description": "Scout — AI workflow capture and desktop agent by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
   "scripts": {
@@ -16,7 +16,7 @@
   "build": {
     "appId": "agency.orage.scout",
     "productName": "Scout",
-    "copyright": "Copyright © 2025 Orage AI Agency",
+    "copyright": "Copyright © 2026 Orage AI Agency",
     "directories": {
       "output": "dist",
       "buildResources": "build"

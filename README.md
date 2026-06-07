@@ -7,6 +7,11 @@
 
 ## What's New
 
+**June 7, 2026 — v2.2.0**
+- **Quality pass across the whole app.** Tightened copy in the UI, sharper log messages, cleaner comments, and a refreshed download page. No behavior changes — every feature works the same, just nicer to read and easier to follow.
+- **Docs refresh.** README, release notes, and the public download page are now consistent with the current feature set and the latest version on disk.
+- **Housekeeping.** Updated copyright year, cleaned up a few stale lines in `main.js` and `renderer.js`, and synced product strings across `package.json`, the marketing page, and the in-app About text.
+
 **June 1, 2026 — v2.1.3**
 - **Starter task pack in the Agent tab.** Six clickable starters tuned for service-business work — tidy Downloads, set up a client project, audit a website, research a prospect, weekly recap, summarize notes. Click one and the textarea fills with a real prompt you can edit before running. No more staring at a blank box.
 - **Native OS notification when the background agent finishes.** Walk away while Scout works; when it's done you get a system notification with a one-line summary. Clicking it brings Scout to the front. Suppressed if the Scout window is already focused.
@@ -50,7 +55,7 @@
 ---
 
 > **Your AI teammate that lives on your computer.**
-> Record what you do and Scout turns it into a skill guide — or just tell Scout what you want done and it handles it for you.
+> Record what you do and Scout turns it into a step-by-step skill guide — or just tell Scout what you want done and it handles it for you, hands-off.
 
 ---
 
@@ -195,7 +200,7 @@ npm run dist:linux         # Linux AppImage + deb → dist/Scout-x.x.x.AppImage 
 npm run dist               # build for the current platform
 ```
 
-Requires Node.js 18+. Each platform installer must be built on its matching OS (the GitHub Actions workflow at `.github/workflows/release.yml` does this automatically — push a `v*` tag and a multi-platform release is created).
+Requires Node.js 18+. Each platform installer must be built on its matching OS (the GitHub Actions workflow at `.github/workflows/release.yml` does this automatically — push a `v*` tag and a multi-platform release is built and published).
 
 ### Deploying the Agent Edge Function
 
@@ -230,4 +235,4 @@ After that, any change you push to `docs/index.html` redeploys automatically. To
 
 ## License
 
-Copyright © 2025 Orage AI Agency
+Copyright © 2026 Orage AI Agency
