@@ -25,3 +25,7 @@ Thumbs.db
 
 # Reference material (original Chrome extension source, not part of the desktop app)
 reference/
+
+# Local scratch / experiments — never checked in
+scratch/
+tmp/

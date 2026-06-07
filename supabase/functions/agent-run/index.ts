@@ -1,3 +1,8 @@
+// Scout agent-run — Supabase Edge Function.
+// Streams Claude Sonnet 4.6 responses as Server-Sent Events to the desktop app.
+// Tool calls are executed locally on the user's machine by main.js; we just
+// forward each stream event verbatim so the renderer can render incrementally.
+
 import Anthropic from "npm:@anthropic-ai/sdk@0.52";
 
 const CORS = {

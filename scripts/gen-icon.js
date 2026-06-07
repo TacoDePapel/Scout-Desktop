@@ -1,4 +1,6 @@
-// Generates build/icon.png — 512×512, no external deps (pure Node.js + zlib)
+// Generates build/icon.png (1024×1024) plus the macOS tray template pair.
+// Pure Node.js + zlib — no external image deps, so this works on every CI
+// runner (Windows, macOS, Linux) without an `npm install` of a native lib.
 const zlib = require('zlib')
 const fs   = require('fs')
 const path = require('path')
@@ -67,7 +69,7 @@ function scoutPixel(x, y, S) {
   const d  = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
   const nd = d / (S / 2) // 0 = centre, 1 = corner
 
-  // Background colour  — dark navy #1C2540
+  // Background color — dark navy #1C2540
   let r = 28, g = 37, b = 64, a = 255
 
   // Outer circle clip (entire icon is a disc)
