@@ -1,4 +1,4 @@
-// Scout Desktop — renderer.js v1.0.0
+// Scout Desktop — renderer.js (v2.2.0)
 
 // IIFE wraps the whole file so `let supabase` doesn't collide with the
 // global `var supabase` exported by vendor/supabase.min.js (UMD).
@@ -1456,7 +1456,7 @@ function settingsTab() {
 
     <div class="glass" style="padding:16px;">
       <div class="label" style="font-size:9px;margin-bottom:4px;">Version</div>
-      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.0.0 · Orage AI Agency · Desktop</div>
+      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.2.0 · Orage AI Agency · Desktop</div>
     </div>
   `
 
@@ -2303,7 +2303,7 @@ function agentTab() {
         </div>
       </div>
       <textarea id="agent-task" class="input" rows="5"
-        placeholder="Describe what you want done in plain English. Pick a starter above to see an example, then edit it for your situation."
+        placeholder="Describe what you want done in plain English. Pick a starter above for an example, then edit it for your situation."
         style="resize:vertical;min-height:100px;font-size:12px;line-height:1.65;"></textarea>
       <div style="display:flex;gap:8px;">
         <button id="agent-run-bg" class="btn btn-primary" style="flex:1;font-size:13px;padding:10px;">Run in Background →</button>
@@ -2317,7 +2317,7 @@ function agentTab() {
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📂</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Read and write files anywhere on your computer</span></div>
         <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🌐</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Open URLs, click, type, and scrape web pages</span></div>
         ${mcpCount ? `<div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">🔌</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">${mcpCount} MCP server${mcpCount !== 1 ? 's' : ''} connected (${Object.keys(mcpStatus).join(', ')})</span></div>` : ''}
-        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📝</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Every completed task becomes a reusable skill guide automatically</span></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;"><span style="font-size:13px;">📝</span><span style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.55);">Every completed task is saved as a reusable skill guide automatically</span></div>
       </div>
     </div>
   `
