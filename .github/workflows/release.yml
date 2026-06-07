@@ -1,5 +1,8 @@
 name: Release
 
+# Triggered by pushing a version tag (e.g. v2.2.0) or manually from the
+# Actions tab. Builds Scout on Windows, macOS, and Linux runners in parallel,
+# then publishes a single GitHub Release with all the artifacts attached.
 on:
   push:
     tags:
