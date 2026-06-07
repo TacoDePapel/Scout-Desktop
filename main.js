@@ -8,7 +8,8 @@ const { exec, spawn } = require('child_process')
 //   - Windows: certain GPU/driver combos that fail to composite
 //   - macOS: Apple Silicon + external displays, ProMotion
 //   - Linux: some Mesa drivers
-// Minor perf hit from software compositing, but the window actually paints.
+// Minor perf hit from software compositing, but the window actually paints —
+// which is the bar for a UI app.
 app.disableHardwareAcceleration()
 
 // Single-instance guard
@@ -84,7 +85,7 @@ class MCPClient {
         this._rpc('initialize', {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          clientInfo: { name: 'Scout', version: '2.0.0' },
+          clientInfo: { name: 'Scout', version: '2.2.0' },
         })
           .then(() => {
             this.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
@@ -189,7 +190,7 @@ const IS_LINUX = process.platform === 'linux'
 const PLATFORM_LABEL = IS_WIN ? 'Windows' : IS_MAC ? 'macOS' : 'Linux'
 const SHELL_LABEL = IS_WIN ? 'PowerShell' : (process.env.SHELL?.split('/').pop() || 'bash')
 const AGENT_SHELL = IS_WIN ? 'powershell.exe' : (process.env.SHELL || '/bin/bash')
-const BASH_TIMEOUT_MS = 5 * 60 * 1000 // 5 min — real tasks need real time
+const BASH_TIMEOUT_MS = 5 * 60 * 1000 // 5 min — real builds, installs, and migrations need real time
 
 const AGENT_TOOLS = [
   {
@@ -689,7 +690,8 @@ function createWindow() {
   })
 
   // Surface silent loadFile / renderer failures (the #1 cause of "opens black"):
-  // replace the broken page with a styled fallback that names the error.
+  // replace the broken page with a styled fallback that names the error, so the
+  // user can actually report what they're seeing instead of "the app is blank".
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error(`[scout] did-fail-load ${code} ${desc} ${url}`)
     const safe = String(desc || 'unknown error').replace(/[<>&"']/g, c =>
@@ -706,7 +708,7 @@ function createWindow() {
          p{max-width:420px;line-height:1.6;opacity:0.85;}</style>
          <h1>Scout couldn't load</h1>
          <p>${safe}</p>
-         <p>On macOS this is usually quarantine. In Terminal:</p>
+         <p>On macOS this is usually quarantine. Open Terminal and run:</p>
          <p><code>xattr -dr com.apple.quarantine /Applications/Scout.app</code></p>`))
   })
 

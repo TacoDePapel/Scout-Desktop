@@ -11,7 +11,7 @@
 <body>
   <div id="app">
     <!-- Static fallback so the window is never pitch black, even if
-         renderer.js fails to parse or the CDN scripts time out. -->
+         renderer.js fails to parse or a vendor script fails to load. -->
     <div id="boot-fallback" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,'Segoe UI',sans-serif;color:#E4AF7A;text-align:center;padding:24px;">
       <div style="font-family:'Bebas Neue',Impact,sans-serif;font-size:52px;letter-spacing:0.05em;line-height:1;">SCOUT</div>
       <div style="font-size:10px;letter-spacing:0.30em;color:rgba(182,128,57,0.55);text-transform:uppercase;margin-top:10px;">By Orage AI</div>
@@ -23,7 +23,7 @@
     // If the renderer hasn't replaced #app within 8s, surface a hint.
     setTimeout(function () {
       var el = document.getElementById('boot-fallback-msg')
-      if (el) el.textContent = "Still loading. If this persists, check your internet connection — Scout fetches its UI runtime from a CDN on first launch."
+      if (el) el.textContent = "Still loading. If this persists, please restart Scout — the renderer didn't initialize in time."
     }, 8000)
   </script>
 

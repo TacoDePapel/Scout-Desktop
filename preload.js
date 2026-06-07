@@ -1,3 +1,7 @@
+// Scout Desktop — preload bridge (v2.2.0)
+// Exposes a narrow, named API to the renderer. Nothing here grants raw access
+// to Node or Electron internals — every entry is an explicit IPC channel.
+
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
