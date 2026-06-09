@@ -1936,6 +1936,9 @@ function updateAgentView() {
     } else if (step.type === 'error') {
       el.style.cssText = 'font-size:11px;color:#F87171;padding:8px 0;'
       el.textContent = step.text
+    } else if (step.type === 'status') {
+      el.style.cssText = 'font-size:10px;color:rgba(228,175,122,0.65);padding:4px 0;font-style:italic;'
+      el.textContent = `· ${step.text}`
     }
     feed.appendChild(el)
   }
@@ -2144,6 +2147,9 @@ function initMainProcessListeners() {
       if (view.kind === 'agent-bg-running') updateBgAgentView()
     } else if (data.type === 'error') {
       bgAgentSteps.push({ type: 'error', text: data.text })
+      if (view.kind === 'agent-bg-running') updateBgAgentView()
+    } else if (data.type === 'status') {
+      bgAgentSteps.push({ type: 'status', text: data.text })
       if (view.kind === 'agent-bg-running') updateBgAgentView()
     } else if (data.type === 'done') {
       bgAgentRunning = false
@@ -2383,6 +2389,9 @@ function updateBgAgentView() {
     } else if (step.type === 'error') {
       el.style.cssText = 'font-size:11px;color:#F87171;padding:8px 0;'
       el.textContent = step.text
+    } else if (step.type === 'status') {
+      el.style.cssText = 'font-size:10px;color:rgba(228,175,122,0.65);padding:4px 0;font-style:italic;'
+      el.textContent = `· ${step.text}`
     }
     feed.appendChild(el)
   }

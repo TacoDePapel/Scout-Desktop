@@ -431,13 +431,56 @@ async function executeToolInMain(name, input) {
   }
 }
 
+// ---- Retry helpers ----
+const MAX_NETWORK_RETRIES = 4
+const RETRY_BASE_MS = 1000
+function isRetryableStatus(s) { return s === 408 || s === 425 || s === 429 || s === 500 || s === 502 || s === 503 || s === 504 || s === 524 || s === 529 }
+function isRetryableNetworkError(e) {
+  const m = String(e?.message || e || '').toLowerCase()
+  return m.includes('econnreset') || m.includes('etimedout') || m.includes('eai_again') || m.includes('socket') || m.includes('aborted') || m.includes('fetch failed') || m.includes('network')
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+async function callAgentEdge(token, body, attempt = 0) {
+  const ctrl = new AbortController()
+  // Per-request timeout for headers/initial response — stream itself can run longer.
+  const headerTimer = setTimeout(() => ctrl.abort(), 60_000)
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/agent-run`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body:    JSON.stringify(body),
+      signal:  ctrl.signal,
+    })
+    clearTimeout(headerTimer)
+    if (!res.ok) {
+      const t = await res.text().catch(() => String(res.status))
+      const err = new Error(`Edge function ${res.status}: ${t.slice(0, 500)}`)
+      err.status = res.status
+      throw err
+    }
+    return res
+  } catch (e) {
+    clearTimeout(headerTimer)
+    const retryable = isRetryableStatus(e.status) || isRetryableNetworkError(e) || e.name === 'AbortError'
+    if (retryable && attempt < MAX_NETWORK_RETRIES) {
+      const wait = RETRY_BASE_MS * Math.pow(2, attempt) + Math.random() * 250
+      send('agent:update', { type: 'status', text: `Network blip (${e.message.slice(0, 80)}). Retrying in ${Math.round(wait/1000)}s…` })
+      await sleep(wait)
+      return callAgentEdge(token, body, attempt + 1)
+    }
+    throw e
+  }
+}
+
 async function runBgAgent(task, token) {
-  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false }
+  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false, stopReason: null, elapsed: 0 }
   updateTray()
   send('agent:update', { type: 'start', task })
 
-  const MAX_ITER = 30
+  const MAX_ITER = 50
   let iter = 0
+  let stopReason = null
 
   while (bgAgent.running && iter < MAX_ITER) {
     iter++
@@ -446,18 +489,11 @@ async function runBgAgent(task, token) {
 
     let res
     try {
-      res = await fetch(`${SUPABASE_URL}/functions/v1/agent-run`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body:    JSON.stringify({ messages: bgAgent.messages, tools: allTools, system: AGENT_SYSTEM }),
-      })
-      if (!res.ok) {
-        const t = await res.text().catch(() => String(res.status))
-        send('agent:update', { type: 'error', text: `Edge function error (${res.status}): ${t}` })
-        break
-      }
+      res = await callAgentEdge(token, { messages: bgAgent.messages, tools: allTools, system: AGENT_SYSTEM })
     } catch (e) {
-      send('agent:update', { type: 'error', text: 'Network error: ' + e.message })
+      const msg = e?.message || String(e)
+      send('agent:update', { type: 'error', text: `Edge call failed after retries: ${msg}` })
+      bgAgent.steps.push({ type: 'error', text: msg })
       break
     }
 
@@ -465,25 +501,40 @@ async function runBgAgent(task, token) {
     let currentTool = null
     let currentText = ''
     let buf = ''
+    let streamErrorEvent = null
     const decoder = new TextDecoder()
+    let lastChunkAt = Date.now()
+    const STALL_MS = 90_000
+
+    // Stall watchdog: if no chunks arrive for STALL_MS, force-abort the stream so we can retry.
+    const stallTimer = setInterval(() => {
+      if (Date.now() - lastChunkAt > STALL_MS) {
+        try { res.body?.destroy?.(new Error('Stream stalled')) } catch {}
+        clearInterval(stallTimer)
+      }
+    }, 5000)
 
     try {
       for await (const chunk of res.body) {
         if (!bgAgent.running) break
+        lastChunkAt = Date.now()
         buf += decoder.decode(chunk, { stream: true })
         const lines = buf.split('\n')
         buf = lines.pop()
 
         for (const line of lines) {
+          // SSE comment heartbeats start with ":" — ignore
           if (!line.startsWith('data: ')) continue
           const raw = line.slice(6).trim()
-          if (raw === '[DONE]') break
+          if (raw === '[DONE]') { stopReason = stopReason || 'done'; break }
           let ev
           try { ev = JSON.parse(raw) } catch { continue }
 
           if (ev.type === 'content_block_start') {
             if (ev.content_block?.type === 'tool_use') {
               currentTool = { id: ev.content_block.id, name: ev.content_block.name, inputRaw: '' }
+            } else if (ev.content_block?.type === 'text') {
+              currentText = ''
             }
           } else if (ev.type === 'content_block_delta') {
             if (ev.delta?.type === 'text_delta') {
@@ -504,24 +555,64 @@ async function runBgAgent(task, token) {
               bgAgent.steps.push({ type: 'text', text: currentText })
               currentText = ''
             }
+          } else if (ev.type === 'message_delta') {
+            if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason
+          } else if (ev.type === 'error') {
+            streamErrorEvent = ev.error?.message || JSON.stringify(ev.error || {})
           }
         }
       }
     } catch (e) {
-      send('agent:update', { type: 'error', text: 'Stream error: ' + e.message })
+      clearInterval(stallTimer)
+      const msg = e?.message || String(e)
+      // If we already collected any tool_use blocks, we can still continue safely.
+      const recoverable = assistantContent.some(b => b.type === 'tool_use')
+      if (!recoverable) {
+        send('agent:update', { type: 'error', text: `Stream error: ${msg}. Will retry on next iteration.` })
+        bgAgent.steps.push({ type: 'error', text: `Stream error: ${msg}` })
+        // Don't break — let the next iter retry from the last good state
+        if (iter < MAX_ITER) { await sleep(1500); continue }
+        break
+      }
+      send('agent:update', { type: 'status', text: `Stream cut, continuing with ${assistantContent.length} blocks already received.` })
+    }
+    clearInterval(stallTimer)
+
+    if (streamErrorEvent) {
+      send('agent:update', { type: 'error', text: `Model error: ${streamErrorEvent}` })
+      bgAgent.steps.push({ type: 'error', text: `Model error: ${streamErrorEvent}` })
+      if (!assistantContent.length) { await sleep(2000); continue }
+    }
+
+    if (!assistantContent.length) {
+      // No content at all — probably an empty stream. Retry once before giving up.
+      if (iter < MAX_ITER) { await sleep(1500); continue }
       break
     }
 
-    if (!assistantContent.length) break
     bgAgent.messages.push({ role: 'assistant', content: assistantContent })
 
     const toolCalls = assistantContent.filter(b => b.type === 'tool_use')
-    if (!toolCalls.length) break
+
+    // If the model hit max_tokens with no tool calls, prompt it to continue.
+    if (!toolCalls.length && stopReason === 'max_tokens') {
+      send('agent:update', { type: 'status', text: 'Hit token limit — continuing…' })
+      bgAgent.messages.push({ role: 'user', content: 'Your previous response was cut off by the token limit. Continue from exactly where you left off.' })
+      stopReason = null
+      continue
+    }
+
+    if (!toolCalls.length) {
+      // Genuine natural finish (end_turn / stop_sequence)
+      break
+    }
 
     const toolResults = []
     for (const tc of toolCalls) {
       if (!bgAgent.running) break
-      const result = await executeToolInMain(tc.name, tc.input)
+      let result
+      try { result = await executeToolInMain(tc.name, tc.input) }
+      catch (e) { result = { error: `Tool threw: ${e?.message || String(e)}` } }
       send('agent:update', { type: 'tool-result', tool: tc.name, result, id: tc.id })
       bgAgent.steps.push({ type: 'tool-call', tool: tc.name, input: tc.input })
       bgAgent.steps.push({ type: 'tool-result', tool: tc.name, result })
@@ -530,11 +621,12 @@ async function runBgAgent(task, token) {
     }
 
     if (toolResults.length) bgAgent.messages.push({ role: 'user', content: toolResults })
+    stopReason = null
   }
 
   bgAgent.running = false
   bgAgent.elapsed = Date.now() - bgAgent.startedAt
-  send('agent:update', { type: 'done', elapsed: bgAgent.elapsed, steps: bgAgent.steps })
+  send('agent:update', { type: 'done', elapsed: bgAgent.elapsed, steps: bgAgent.steps, iterations: iter })
   updateTray()
   notifyAgentDone()
 }
