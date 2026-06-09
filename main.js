@@ -264,6 +264,30 @@ const AGENT_TOOLS = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'gmail_send',
+    description: `One-shot: send an email through Gmail using the user's signed-in Gmail account. This is the PREFERRED way to send email — it opens Gmail's compose URL with prefilled fields and clicks Send in the background. Use this instead of browser_open/browser_action for any "send email" task. If the user is not signed in to Gmail in the Scout Agent Browser, this returns { needsSignin: true } and shows the browser so they can sign in once; after that it just works. Empty subject/body are allowed.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        to:      { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Subject line (may be empty string)' },
+        body:    { type: 'string', description: 'Body text (may be empty string)' },
+        cc:      { type: 'string', description: 'Optional CC recipients (comma-separated)' },
+        bcc:     { type: 'string', description: 'Optional BCC recipients (comma-separated)' },
+      },
+      required: ['to'],
+    },
+  },
+  {
+    name: 'show_agent_browser',
+    description: 'Show or hide the Scout Agent Browser window. The browser runs HIDDEN by default — you should call this with {visible:true} ONLY if the page genuinely needs the user (login form requiring a password / 2FA / captcha) and you cannot proceed without them. After they help, call with {visible:false} again so it goes back to background mode. Do NOT show the browser for routine work — that defeats the whole point of background automation.',
+    input_schema: {
+      type: 'object',
+      properties: { visible: { type: 'boolean' } },
+      required: ['visible'],
+    },
+  },
+  {
     name: 'open_app',
     description: `Launch a native application by name (cross-platform). On ${PLATFORM_LABEL}, uses ${IS_WIN ? '"start"' : IS_MAC ? '"open -a"' : 'xdg-open / direct exec'}. Examples: "Slack", "Notion", "Visual Studio Code", "Finder", "Explorer".`,
     input_schema: {
@@ -289,7 +313,8 @@ Your tools let you do real things, not toy demos:
 - bash — run any shell command (git clone, npm install, python scripts, ffmpeg, curl, file management, etc.)
 - read_file / write_file / list_dir — read and modify the file system anywhere on the machine
 - open_app — launch installed apps (Slack, Notion, VS Code, Finder, Chrome, etc.)
-- browser_open / browser_action — open URLs and automate them (navigate, click, type, screenshot, eval JS)
+- gmail_send — ONE-SHOT send an email through the user's Gmail. ALWAYS use this for any email task instead of browser_open/browser_action — it is dramatically faster, more reliable, and costs almost no tokens. Just pass to/subject/body. Empty subject/body is fine.
+- browser_open / browser_action — open URLs and automate them (navigate, click, type, screenshot, eval JS). Use this only when no dedicated tool exists for the job (e.g. for non-Gmail sites).
 - screenshot_desktop — see exactly what's on the user's screen right now
 - MCP tools (prefixed mcp__server__tool) — talk to GitHub, Slack, Notion, Linear, Supabase, and any other MCP server the user has configured
 
@@ -297,10 +322,11 @@ Operating principles:
 1. Be ambitious. Real tasks: "set up a new React project and push it to GitHub", "find every PDF in Downloads from this month and summarize them", "open Slack and post a status update", "scrape this site and save the results to CSV". Don't reduce a request to a single trivial command unless that's literally what was asked.
 2. Plan in 1-2 sentences, then execute. Show progress as you go — narrate what you're doing between tool calls.
 3. Use ${SHELL_LABEL} syntax in bash commands. ${IS_WIN ? 'PowerShell cmdlets like Get-ChildItem, Set-Location, $env:VAR.' : 'POSIX shell — ls, cd, $VAR, /usr/bin paths.'}
-4. After browser_open, always take a browser screenshot before clicking — you need to see the page state.
-5. If a tool errors, read the error, then try a different approach (don't repeat the same failing call).
-6. Touching ~/.env, credential files, or anything outside the user's expected scope? Mention it first.
-7. When done, summarize in 2-4 lines: what you accomplished, where the output lives, what's next.`
+4. The Scout Agent Browser runs HIDDEN. The user CANNOT see it and you should not expect them to. Drive it entirely yourself via browser_action: screenshot to see the page, then click/type using CSS selectors. After every action that changes the page, take a screenshot before the next click. Never tell the user to "open the browser and click X" — YOU click X.
+5. Only call show_agent_browser({visible:true}) if the page genuinely requires the human (password entry, 2FA code, captcha). If you do, narrate "I need your help with <X>" in a text message so they know. After they're done, call show_agent_browser({visible:false}).
+6. If a tool errors, read the error, then try a different approach (don't repeat the same failing call).
+7. Touching ~/.env, credential files, or anything outside the user's expected scope? Mention it first.
+8. When done, summarize in 2-4 lines: what you accomplished, where the output lives, what's next.`
 
 let bgAgent = {
   running:     false,
@@ -309,6 +335,52 @@ let bgAgent = {
   messages:    [],
   startedAt:   0,
   wasStopped:  false,
+}
+
+// ---- Agent browser factory ----
+//
+// Background-first: the window opens HIDDEN. The agent drives it via
+// webContents (loadURL, executeJavaScript, capturePage) — none of which
+// require the window to be visible. The user sees the agent's narration
+// in the Scout main window, not a popup that steals focus.
+//
+// The user can toggle it visible from the tray menu ("Show Agent Browser")
+// if they want to peek or hand-resolve a login / captcha.
+//
+// We use the DEFAULT session (no `partition`) so any logins the user has
+// already performed in earlier Scout versions are preserved.
+let agentBrowserVisible = false
+function makeAgentBrowser() {
+  const win = new BrowserWindow({
+    width: 1280, height: 800,
+    title: 'Scout Agent Browser',
+    show: agentBrowserVisible,
+    skipTaskbar: !agentBrowserVisible,
+    webPreferences: { contextIsolation: true },
+  })
+  // Real Chrome UA so Google et al. don't refuse interactive sign-in.
+  try {
+    const ua = win.webContents.getUserAgent()
+      .replace(/Scout\/[^ ]+ /, '')
+      .replace(/Electron\/[^ ]+ /, '')
+    win.webContents.setUserAgent(ua)
+  } catch {}
+  win.on('closed', () => { agentBrowser = null })
+  return win
+}
+
+function setAgentBrowserVisible(visible) {
+  agentBrowserVisible = !!visible
+  if (agentBrowser && !agentBrowser.isDestroyed()) {
+    if (visible) {
+      try { agentBrowser.setSkipTaskbar(false) } catch {}
+      agentBrowser.showInactive()
+    } else {
+      agentBrowser.hide()
+      try { agentBrowser.setSkipTaskbar(true) } catch {}
+    }
+  }
+  updateTray()
 }
 
 function notifyAgentDone() {
@@ -370,8 +442,7 @@ async function executeToolInMain(name, input) {
     case 'browser_open': {
       try {
         if (!agentBrowser || agentBrowser.isDestroyed()) {
-          agentBrowser = new BrowserWindow({ width: 1280, height: 800, title: 'Scout Agent Browser', webPreferences: { contextIsolation: true } })
-          agentBrowser.on('closed', () => { agentBrowser = null })
+          agentBrowser = makeAgentBrowser()
         }
         await agentBrowser.loadURL(input.url)
         return { success: true, url: agentBrowser.webContents.getURL() }
@@ -383,7 +454,18 @@ async function executeToolInMain(name, input) {
       const wc = agentBrowser.webContents
       try {
         switch (input.action) {
-          case 'screenshot': { const img = await wc.capturePage(); return { dataUrl: img.toDataURL(), url: wc.getURL() } }
+          case 'screenshot': {
+            // Capture and downscale to keep tokens low. JPEG @ 65 is plenty for UI screenshots.
+            const img = await wc.capturePage()
+            const resized = img.resize({ width: 1024 })
+            const jpeg = resized.toJPEG(65)
+            return {
+              url: wc.getURL(),
+              _image: { mediaType: 'image/jpeg', base64: jpeg.toString('base64') },
+              dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
+              summary: `Screenshot of ${wc.getURL()}`,
+            }
+          }
           case 'get_text':   return { text: await wc.executeJavaScript('document.body.innerText'), url: wc.getURL() }
           case 'get_url':    return { url: wc.getURL(), title: agentBrowser.getTitle() }
           case 'navigate':   await wc.loadURL(input.text); return { success: true, url: wc.getURL() }
@@ -398,10 +480,99 @@ async function executeToolInMain(name, input) {
 
     case 'screenshot_desktop': {
       try {
-        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 720 } })
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1024, height: 576 } })
         if (!sources[0]) return { error: 'No screen source' }
-        return { dataUrl: sources[0].thumbnail.toDataURL() }
+        const jpeg = sources[0].thumbnail.toJPEG(65)
+        return {
+          _image: { mediaType: 'image/jpeg', base64: jpeg.toString('base64') },
+          dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
+          summary: 'Desktop screenshot',
+        }
       } catch (e) { return { error: e.message } }
+    }
+
+    case 'show_agent_browser': {
+      try { setAgentBrowserVisible(!!input.visible); return { success: true, visible: agentBrowserVisible } }
+      catch (e) { return { error: e.message } }
+    }
+
+    case 'gmail_send': {
+      try {
+        const to      = String(input.to || '').trim()
+        if (!to) return { error: 'to is required' }
+        const subject = String(input.subject || '')
+        const body    = String(input.body    || '')
+        const cc      = String(input.cc      || '')
+        const bcc     = String(input.bcc     || '')
+
+        if (!agentBrowser || agentBrowser.isDestroyed()) agentBrowser = makeAgentBrowser()
+
+        // Gmail's documented compose URL — opens a prefilled compose window.
+        const qp = new URLSearchParams({ view: 'cm', fs: '1', to, su: subject, body })
+        if (cc)  qp.set('cc', cc)
+        if (bcc) qp.set('bcc', bcc)
+        const url = `https://mail.google.com/mail/?${qp.toString()}`
+
+        await agentBrowser.loadURL(url)
+        const wc = agentBrowser.webContents
+
+        // Wait up to 30s for either the compose form (Send button) or a sign-in redirect.
+        const ready = await wc.executeJavaScript(`
+          new Promise(res => {
+            const start = Date.now()
+            const findSend = () => document.querySelector('div[role="button"][aria-label^="Send"]')
+              || document.querySelector('div[role="button"][data-tooltip^="Send"]')
+              || document.querySelector('div[role="button"][aria-label*="Enviar"]')
+            const tick = () => {
+              const h = location.href
+              if (h.includes('accounts.google.com') || h.includes('ServiceLogin') || h.includes('/signin/')) {
+                return res({ signin: true, href: h })
+              }
+              const s = findSend()
+              if (s) return res({ ready: true })
+              if (Date.now() - start > 30000) return res({ timeout: true, href: h })
+              setTimeout(tick, 400)
+            }
+            tick()
+          })
+        `)
+
+        if (ready.signin) {
+          setAgentBrowserVisible(true)
+          return {
+            needsSignin: true,
+            error: 'Gmail wants you to sign in. The browser is now visible — sign in once, then press Run again. After this you will never be asked again.',
+            href: ready.href,
+          }
+        }
+        if (ready.timeout) {
+          return { error: `Gmail compose did not open within 30s. URL is now: ${ready.href}` }
+        }
+
+        // Click Send. Returns whether the post-send confirmation popped up.
+        const sentResult = await wc.executeJavaScript(`
+          (async () => {
+            const send = document.querySelector('div[role="button"][aria-label^="Send"]')
+              || document.querySelector('div[role="button"][data-tooltip^="Send"]')
+              || document.querySelector('div[role="button"][aria-label*="Enviar"]')
+            if (!send) return { error: 'Send button disappeared.' }
+            send.click()
+            // Wait a moment for the toast / confirmation
+            await new Promise(r => setTimeout(r, 2500))
+            const toast = document.body.innerText.match(/Message sent|Mensaje enviado|Conversation moved/i)
+            return { clicked: true, confirmation: toast ? toast[0] : null }
+          })()
+        `)
+        if (sentResult.error) return { error: sentResult.error }
+
+        return {
+          success: true,
+          to, subject, body, cc, bcc,
+          confirmation: sentResult.confirmation || 'Send button clicked; no explicit confirmation toast found, but Gmail typically confirms via the inbox.',
+        }
+      } catch (e) {
+        return { error: e.message }
+      }
     }
 
     case 'open_app': {
@@ -439,7 +610,98 @@ function isRetryableNetworkError(e) {
   const m = String(e?.message || e || '').toLowerCase()
   return m.includes('econnreset') || m.includes('etimedout') || m.includes('eai_again') || m.includes('socket') || m.includes('aborted') || m.includes('fetch failed') || m.includes('network')
 }
+function isRateLimitError(msgOrErr) {
+  const m = String(msgOrErr?.message || msgOrErr || '').toLowerCase()
+  return m.includes('rate_limit') || m.includes('rate limit') || m.includes('429')
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+// ---- Token-budget pacer ----
+//
+// Anthropic enforces per-minute input-token limits per org/model. Free / build
+// tier 1 caps Sonnet at ~10K input TPM, Haiku at much higher. Even on Haiku we
+// pace to be safe. Tracks input tokens in a rolling 60s window and *waits* before
+// firing the next request if it would exceed the budget — so the model never
+// returns 429 in the first place, instead of us reacting to one after the fact.
+const TOKEN_BUDGETS = {
+  'claude-haiku-4-5':   50000,
+  'claude-sonnet-4-5':  20000,
+  'claude-sonnet-4-6':   9000,  // user's tier caps at 10K, leave 10% headroom
+  'default':            20000,
+}
+const tokenLog = []  // [{ts, model, tokens}]
+function budgetFor(model) { return TOKEN_BUDGETS[model] ?? TOKEN_BUDGETS.default }
+function tokensUsedLastMinute(model) {
+  const now = Date.now()
+  while (tokenLog.length && now - tokenLog[0].ts > 60_000) tokenLog.shift()
+  return tokenLog.filter(r => r.model === model).reduce((s, r) => s + r.tokens, 0)
+}
+function estimateInputTokens(payload) {
+  // Rough heuristic: messages JSON + system + tool defs. Images cost ~1500 fixed.
+  let imgs = 0
+  const walk = (v) => {
+    if (!v) return
+    if (Array.isArray(v)) { v.forEach(walk); return }
+    if (typeof v === 'object') {
+      if (v.type === 'image') { imgs++; return }
+      Object.values(v).forEach(walk)
+      return
+    }
+  }
+  walk(payload.messages)
+  const sysChars = (payload.system || '').length
+  const toolsChars = JSON.stringify(payload.tools || []).length
+  const msgsChars = JSON.stringify(payload.messages || []).length
+  // ~3.5 chars/token for English/JSON
+  const textTokens = Math.ceil((sysChars + toolsChars + msgsChars) / 3.5)
+  const imgTokens = imgs * 1500
+  // Add 10% overhead for tool schema metadata / system framing
+  return Math.ceil((textTokens + imgTokens) * 1.10)
+}
+async function reserveTokenBudget(model, estimated) {
+  while (true) {
+    const used = tokensUsedLastMinute(model)
+    const budget = budgetFor(model)
+    if (used + estimated <= budget) {
+      tokenLog.push({ ts: Date.now(), model, tokens: estimated })
+      return
+    }
+    // Sleep until enough oldest entries expire to free room.
+    const oldest = tokenLog.find(r => r.model === model)?.ts ?? Date.now()
+    const wait = Math.max(1500, 60_000 - (Date.now() - oldest) + 750)
+    send('agent:update', { type: 'status', text: `Pacing for ${model} rate limit (${used}/${budget} TPM used). Waiting ${Math.round(wait/1000)}s…` })
+    await sleep(Math.min(wait, 30_000))
+  }
+}
+function actualizeBudget(model, actualTokens) {
+  // Replace the most recent estimate for this model with the actual count.
+  for (let i = tokenLog.length - 1; i >= 0; i--) {
+    if (tokenLog[i].model === model) { tokenLog[i].tokens = actualTokens; return }
+  }
+}
+
+// History compaction — keep image content blocks only in the last N tool-result rounds.
+// Older screenshots are replaced with a short text placeholder so the conversation
+// doesn't balloon past the input-token rate limit after a few iterations.
+function compactMessages(messages, keepLastImageRounds = 2) {
+  // Indices of user messages that carry tool_result blocks.
+  const trIdxs = []
+  messages.forEach((m, i) => {
+    if (m.role === 'user' && Array.isArray(m.content) && m.content.some(c => c?.type === 'tool_result')) trIdxs.push(i)
+  })
+  if (trIdxs.length <= keepLastImageRounds) return messages
+  const keepFromIdx = trIdxs[trIdxs.length - keepLastImageRounds]
+  return messages.map((m, i) => {
+    if (i >= keepFromIdx) return m
+    if (m.role !== 'user' || !Array.isArray(m.content)) return m
+    const newContent = m.content.map(c => {
+      if (c?.type !== 'tool_result' || !Array.isArray(c.content)) return c
+      const stripped = c.content.map(b => b?.type === 'image' ? { type: 'text', text: '[earlier screenshot — image omitted]' } : b)
+      return { ...c, content: stripped }
+    })
+    return { ...m, content: newContent }
+  })
+}
 
 async function callAgentEdge(token, body, attempt = 0) {
   const ctrl = new AbortController()
@@ -473,14 +735,19 @@ async function callAgentEdge(token, body, attempt = 0) {
   }
 }
 
+// Per-conversation model — starts on Haiku to fit free-tier TPM. If the user
+// upgrades or wants Sonnet, set bgAgent.model before running.
+const DEFAULT_AGENT_MODEL = 'claude-haiku-4-5'
+
 async function runBgAgent(task, token) {
-  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false, stopReason: null, elapsed: 0 }
+  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false, stopReason: null, elapsed: 0, model: DEFAULT_AGENT_MODEL }
   updateTray()
   send('agent:update', { type: 'start', task })
 
   const MAX_ITER = 50
   let iter = 0
   let stopReason = null
+  let consecutiveRateLimits = 0
 
   while (bgAgent.running && iter < MAX_ITER) {
     iter++
@@ -489,13 +756,32 @@ async function runBgAgent(task, token) {
 
     let res
     try {
-      res = await callAgentEdge(token, { messages: bgAgent.messages, tools: allTools, system: AGENT_SYSTEM })
+      const payloadMessages = compactMessages(bgAgent.messages)
+      const payload = { messages: payloadMessages, tools: allTools, system: AGENT_SYSTEM, model: bgAgent.model }
+      const estimate = estimateInputTokens(payload)
+      await reserveTokenBudget(bgAgent.model, estimate)
+      res = await callAgentEdge(token, payload)
     } catch (e) {
       const msg = e?.message || String(e)
+      if (isRateLimitError(e) || isRateLimitError(msg)) {
+        consecutiveRateLimits++
+        // After 2 consecutive rate limits on the current model, escalate to
+        // the larger budget (Sonnet 4.5 if we're on Haiku, vice versa).
+        if (consecutiveRateLimits >= 2 && bgAgent.model === 'claude-haiku-4-5') {
+          bgAgent.model = 'claude-sonnet-4-5'
+          send('agent:update', { type: 'status', text: `Switching to ${bgAgent.model} — Haiku tier is also throttled.` })
+        }
+        const wait = 65_000
+        send('agent:update', { type: 'status', text: `Rate limited. Waiting ${wait/1000}s…` })
+        bgAgent.steps.push({ type: 'status', text: 'Rate limited. Waiting 65s…' })
+        await sleep(wait)
+        if (bgAgent.running && iter < MAX_ITER) continue
+      }
       send('agent:update', { type: 'error', text: `Edge call failed after retries: ${msg}` })
       bgAgent.steps.push({ type: 'error', text: msg })
       break
     }
+    consecutiveRateLimits = 0
 
     const assistantContent = []
     let currentTool = null
@@ -530,7 +816,10 @@ async function runBgAgent(task, token) {
           let ev
           try { ev = JSON.parse(raw) } catch { continue }
 
-          if (ev.type === 'content_block_start') {
+          if (ev.type === 'message_start') {
+            const actual = ev.message?.usage?.input_tokens
+            if (actual) actualizeBudget(bgAgent.model, actual)
+          } else if (ev.type === 'content_block_start') {
             if (ev.content_block?.type === 'tool_use') {
               currentTool = { id: ev.content_block.id, name: ev.content_block.name, inputRaw: '' }
             } else if (ev.content_block?.type === 'text') {
@@ -579,9 +868,24 @@ async function runBgAgent(task, token) {
     clearInterval(stallTimer)
 
     if (streamErrorEvent) {
-      send('agent:update', { type: 'error', text: `Model error: ${streamErrorEvent}` })
-      bgAgent.steps.push({ type: 'error', text: `Model error: ${streamErrorEvent}` })
-      if (!assistantContent.length) { await sleep(2000); continue }
+      const rl = isRateLimitError(streamErrorEvent)
+      send('agent:update', { type: 'error', text: `Model error: ${streamErrorEvent.slice(0, 280)}` })
+      bgAgent.steps.push({ type: 'error', text: `Model error: ${streamErrorEvent.slice(0, 280)}` })
+      if (rl) {
+        consecutiveRateLimits++
+        if (consecutiveRateLimits >= 2 && bgAgent.model === 'claude-haiku-4-5') {
+          bgAgent.model = 'claude-sonnet-4-5'
+          send('agent:update', { type: 'status', text: `Switching to ${bgAgent.model} after repeated rate limits.` })
+        }
+        send('agent:update', { type: 'status', text: 'Rate limited. Waiting 65s for the per-minute window to reset…' })
+        bgAgent.steps.push({ type: 'status', text: 'Waiting 65s for rate-limit window…' })
+        await sleep(65_000)
+        if (!assistantContent.length) continue
+      } else if (!assistantContent.length) {
+        await sleep(2000); continue
+      }
+    } else {
+      consecutiveRateLimits = 0
     }
 
     if (!assistantContent.length) {
@@ -616,8 +920,27 @@ async function runBgAgent(task, token) {
       send('agent:update', { type: 'tool-result', tool: tc.name, result, id: tc.id })
       bgAgent.steps.push({ type: 'tool-call', tool: tc.name, input: tc.input })
       bgAgent.steps.push({ type: 'tool-result', tool: tc.name, result })
-      const resultText = result?.error ? `Error: ${result.error}` : JSON.stringify(result, null, 2)
-      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: resultText.slice(0, 20000) })
+
+      // If the tool returned an image, send it as a proper image content block
+      // so Claude can actually see it (instead of as base64 text that wastes ~6K
+      // tokens per screenshot and is unreadable to the model anyway).
+      let content
+      if (result && result._image && !result.error) {
+        const { mediaType, base64 } = result._image
+        const meta = JSON.stringify({ url: result.url, summary: result.summary }).slice(0, 500)
+        content = [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: meta },
+        ]
+      } else {
+        // Strip any base64 from non-image text results too (safety net).
+        const slim = result && typeof result === 'object'
+          ? Object.fromEntries(Object.entries(result).filter(([k]) => k !== '_image' && k !== 'dataUrl'))
+          : result
+        const resultText = result?.error ? `Error: ${result.error}` : JSON.stringify(slim, null, 2)
+        content = resultText.slice(0, 6000)
+      }
+      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content })
     }
 
     if (toolResults.length) bgAgent.messages.push({ role: 'user', content: toolResults })
@@ -706,6 +1029,9 @@ function buildTrayMenu() {
     { type: 'separator' },
     { label: 'Stop Agent',        enabled: bgAgent.running,    click: () => { bgAgent.running = false; bgAgent.wasStopped = true; updateTray() } },
     { label: monitorActive ? 'Stop Monitor' : 'Start Monitor', click: () => { monitorActive ? stopMonitor() : startMonitor() } },
+    { label: agentBrowserVisible ? 'Hide Agent Browser' : 'Show Agent Browser',
+      enabled: !!(agentBrowser && !agentBrowser.isDestroyed()),
+      click: () => setAgentBrowserVisible(!agentBrowserVisible) },
     { type: 'separator' },
     { label: 'Quit Scout',        click: () => { mcpClients.forEach(c => c.stop()); app.quit() } },
   ])
@@ -931,7 +1257,13 @@ ipcMain.handle('agent:bash', async (_, { command, cwd }) =>
 ipcMain.handle('agent:read-file',  (_, { path: p }) => { try { return { content: fs.readFileSync(p, 'utf8') } } catch (e) { return { error: e.message } } })
 ipcMain.handle('agent:write-file', (_, { path: p, content }) => { try { const d = path.dirname(p); if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(p, content, 'utf8'); return { success: true } } catch (e) { return { error: e.message } } })
 ipcMain.handle('agent:list-dir',   (_, { path: p }) => { try { return { entries: fs.readdirSync(p, { withFileTypes: true }).map(e => ({ name: e.name, isDir: e.isDirectory() })) } } catch (e) { return { error: e.message } } })
-ipcMain.handle('agent:browser-open',   async (_, { url }) => { try { if (!agentBrowser || agentBrowser.isDestroyed()) { agentBrowser = new BrowserWindow({ width: 1280, height: 800, title: 'Scout Agent Browser', webPreferences: { contextIsolation: true } }); agentBrowser.on('closed', () => { agentBrowser = null }) } await agentBrowser.loadURL(url); return { success: true, url: agentBrowser.webContents.getURL() } } catch (e) { return { error: e.message } } })
+ipcMain.handle('agent:browser-open', async (_, { url }) => {
+  try {
+    if (!agentBrowser || agentBrowser.isDestroyed()) agentBrowser = makeAgentBrowser()
+    await agentBrowser.loadURL(url)
+    return { success: true, url: agentBrowser.webContents.getURL() }
+  } catch (e) { return { error: e.message } }
+})
 ipcMain.handle('agent:browser-action', async (_, { action, selector, text, script }) => {
   if (!agentBrowser || agentBrowser.isDestroyed()) return { error: 'No browser open.' }
   const wc = agentBrowser.webContents

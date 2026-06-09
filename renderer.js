@@ -1547,7 +1547,21 @@ function skillView(rec, skill, allSkills) {
   actions.querySelector('#run-skill')?.addEventListener('click', async () => {
     const btn = actions.querySelector('#run-skill')
     btn.disabled = true; btn.textContent = 'Starting agent…'
-    const task = `You are executing a previously-recorded workflow as an autonomous agent. The user has already approved this skill — do not ask for confirmation, just complete it end-to-end. Use bash, browser_open / browser_action, read_file / write_file, and any MCP tools available. If a step requires a credential or input the skill doesn't name, make a best-effort guess and proceed; report what you guessed at the end.\n\nWhen done, summarise: what files / URLs you touched, the final result, and anything you skipped or guessed.\n\n--- SKILL ---\n\n${skill.body_md.trim()}\n\n--- END SKILL ---`
+    const task = `You are replaying a workflow the user already performed. Your job is to REPLICATE their actions exactly, in the BACKGROUND, with ZERO user interaction.
+
+Hard rules:
+1. If the workflow is to SEND AN EMAIL via Gmail, you MUST use the gmail_send tool. Do NOT use browser_open + browser_action to click through Gmail's compose UI — that is slow, fragile, and burns tokens. gmail_send does the whole compose+send in one call. Pass the exact to/subject/body from the skill (empty strings are fine).
+2. Treat the skill body as ground truth. Every URL, recipient, subject, body text, and file path mentioned in the skill is what the user actually used. Pass those exact strings to your tools. Do NOT paraphrase, "improve", or substitute placeholder values like "test", "example.com", "user@example.com".
+3. If a required value is genuinely missing from the skill, STOP. Emit a single message starting with "NEEDS:" listing the missing fields and end the run. Do NOT improvise.
+4. The browser runs HIDDEN. Drive everything via tools. Never ask the user to click anything. The only exception is if gmail_send returns { needsSignin: true } — that means the user needs to sign in to Gmail once. Surface the error message verbatim and end the run.
+5. When done in one shot, just call the right tool and stop. Don't take screenshots "to verify" — if the tool returns success, it succeeded.
+6. Final summary: 1-2 lines. Exact values used (recipient, subject, etc.) so the user can verify.
+
+--- SKILL ---
+
+${skill.body_md.trim()}
+
+--- END SKILL ---`
     try {
       const { error } = await window.electronAPI.startAgentBg({ task, token: SUPABASE_ANON_KEY })
       if (error) { alert('Agent failed to start: ' + error); btn.disabled = false; btn.textContent = '✦ Run automatically'; return }

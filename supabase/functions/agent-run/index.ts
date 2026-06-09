@@ -16,7 +16,11 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const MODEL_PRIMARY  = "claude-sonnet-4-6";
+// Default to Haiku 4.5 — same tier of Anthropic accounts get much higher
+// TPM on Haiku than on Sonnet (Sonnet caps at ~10K input TPM on the free
+// tier, Haiku is typically 50K+). Quality is plenty for browser / file
+// tool-use loops. The client can override via the `model` request field.
+const MODEL_PRIMARY  = "claude-haiku-4-5";
 const MODEL_FALLBACK = "claude-sonnet-4-5";
 const MAX_TOKENS     = 16384;
 const MAX_RETRIES    = 3;
