@@ -86,7 +86,7 @@ class MCPClient {
         this._rpc('initialize', {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          clientInfo: { name: 'Scout', version: '2.4.0' },
+          clientInfo: { name: 'Scout', version: '2.4.1' },
         })
           .then(() => {
             this.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')

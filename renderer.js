@@ -1,4 +1,4 @@
-// Scout Desktop — renderer.js (v2.4.0)
+// Scout Desktop — renderer.js (v2.4.1)
 
 // IIFE wraps the whole file so `let supabase` doesn't collide with the
 // global `var supabase` exported by vendor/supabase.min.js (UMD).
@@ -1510,7 +1510,7 @@ function settingsTab() {
 
     <div class="glass" style="padding:16px;">
       <div class="label" style="font-size:9px;margin-bottom:4px;">Version</div>
-      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.4.0 · Orage AI Agency · Desktop</div>
+      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.4.1 · Orage AI Agency · Desktop</div>
     </div>
   `
 
