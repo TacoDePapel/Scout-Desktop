@@ -7,6 +7,11 @@
 
 ## What's New
 
+**June 27, 2026 — v2.4.0**
+- **Replay speed multiplier.** Each macro row has a `1× / 2× / 5×` selector. Run a 90-second form-fill in 18 seconds when you don't care about looking natural.
+- **Schedule macros for later.** Pick a date and time — Scout queues the run and fires it automatically, even with the window closed (it stays in the tray for pending jobs). Perfect for overnight or "during lunch" workflows. Pending runs show above your saved macros; cancel any of them in one click.
+- **"Don't touch" overlay during replay.** A full-screen, click-through warning banner pops up while a macro is running so you (and anyone watching) know the cursor isn't yours. `Alt+Shift+Esc` to abort.
+
 **June 27, 2026 — v2.3.0**
 - **Macro Mode — record and replay your clicks and keystrokes, no sign-in needed.** New "Macros" tab. Hit the big record button (or `Alt+Shift+K` from anywhere), do whatever you want — fill a form, click through a checkout, navigate an app — then hit it again to save. Every saved macro gets a `▶ Run with AI` button that replays the exact sequence at the original speed. Scout minimizes itself, counts down 3 → 2 → 1, then drives your mouse and keyboard.
 - **Local-only, offline.** Macros live as plain JSON in your user-data folder. Nothing touches Supabase. Recording works whether you're signed in or not.
