@@ -1274,21 +1274,135 @@ ipcMain.handle('macro:rename',          (_, { id, name })  => macro.renameMacro(
 ipcMain.handle('macro:start-recording', ()                 => { const r = macro.startRecording(); pushMacroState(); return r })
 ipcMain.handle('macro:stop-recording',  (_, { name } = {}) => { const r = macro.stopRecording(name); pushMacroState(); return r })
 ipcMain.handle('macro:play', async (_, { id, speed, hideWindow }) => {
+  return playMacroWithChrome(id, { speed, hideWindow })
+})
+ipcMain.handle('macro:stop-play', () => { const r = macro.stopPlay(); pushMacroState(); return r })
+
+// Internal: wraps macro.play() with the UX chrome — minimizes Scout, shows a
+// full-screen click-through "don't touch" warning overlay during replay, then
+// tears both down. Used by the renderer IPC AND the scheduler tick, so the
+// behavior is identical whether the user clicks "Run with AI" or a scheduled
+// macro fires on its own.
+async function playMacroWithChrome(id, { speed, hideWindow } = {}) {
   pushMacroState()
-  // Hide Scout's window so a maximized Scout doesn't sit on top of whatever
-  // app the macro is targeting. The user can opt out with hideWindow:false.
   const shouldHide = hideWindow !== false
   if (shouldHide && mainWindow && mainWindow.isVisible()) {
     try { mainWindow.minimize() } catch {}
   }
-  const r = await macro.play(id, { speed })
-  pushMacroState()
-  if (shouldHide && mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.restore(); mainWindow.focus() } catch {}
+  const overlay = createMacroOverlay()
+  try {
+    const r = await macro.play(id, { speed })
+    return r
+  } finally {
+    try { overlay?.destroy() } catch {}
+    pushMacroState()
+    if (shouldHide && mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.restore(); mainWindow.focus() } catch {}
+    }
   }
+}
+
+// "Don't touch" overlay shown across the primary display during macro replay.
+// Always-on-top + transparent + click-through so synthesized AND physical
+// mouse events pass through to whatever app the macro is driving. Pure
+// visual deterrent — true input blocking on Win10+ requires admin.
+let _macroOverlay = null
+function createMacroOverlay() {
+  if (_macroOverlay && !_macroOverlay.isDestroyed()) {
+    try { _macroOverlay.destroy() } catch {}
+  }
+  const { screen } = require('electron')
+  const display = screen.getPrimaryDisplay()
+  const w = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width:  display.bounds.width,
+    height: display.bounds.height,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    resizable: false,
+    movable: false,
+    hasShadow: false,
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  w.setAlwaysOnTop(true, 'screen-saver')
+  w.setIgnoreMouseEvents(true, { forward: false })
+  const html = `<!doctype html><html><head><style>
+    html,body{margin:0;padding:0;background:transparent;color:#FFE8C7;
+      font-family:Montserrat,system-ui,sans-serif;height:100vh;overflow:hidden;
+      pointer-events:none;user-select:none;-webkit-user-select:none;}
+    .banner{position:absolute;top:24px;left:50%;transform:translateX(-50%);
+      background:rgba(20,10,2,0.92);border:1px solid rgba(228,175,122,0.55);
+      border-radius:12px;padding:14px 22px;
+      box-shadow:0 8px 32px rgba(0,0,0,0.55),0 0 0 1px rgba(255,232,199,0.10) inset;
+      display:flex;flex-direction:column;align-items:center;gap:4px;min-width:340px;}
+    .dot{width:10px;height:10px;border-radius:50%;background:#dc2626;
+      box-shadow:0 0 12px #dc2626;animation:pulse 1s ease-in-out infinite;
+      position:absolute;left:14px;top:50%;transform:translateY(-50%);}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+    .ttl{font-size:13px;letter-spacing:0.08em;text-transform:uppercase;
+      color:#E4AF7A;font-weight:600;}
+    .sub{font-size:11px;color:rgba(255,232,199,0.65);}
+    kbd{background:rgba(182,128,57,0.18);border:1px solid rgba(228,175,122,0.30);
+      padding:1px 6px;border-radius:4px;font-family:'JetBrains Mono',ui-monospace;
+      font-size:10px;color:#E4AF7A;}
+  </style></head><body>
+    <div class="banner">
+      <div class="dot"></div>
+      <div class="ttl">Macro running</div>
+      <div class="sub">Don't touch your mouse or keyboard · <kbd>Alt+Shift+Esc</kbd> to abort</div>
+    </div>
+  </body></html>`
+  w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  w.once('ready-to-show', () => w.show())
+  _macroOverlay = w
+  return w
+}
+
+// ---- Macro scheduler — "run this macro at a specific datetime" ----
+
+ipcMain.handle('macro:list-schedules', () => macro.listSchedules())
+ipcMain.handle('macro:schedule', (_, opts) => {
+  const r = macro.scheduleMacro(opts || {})
+  if (!r.error) send('macro:schedules-changed', macro.listSchedules())
   return r
 })
-ipcMain.handle('macro:stop-play', () => { const r = macro.stopPlay(); pushMacroState(); return r })
+ipcMain.handle('macro:cancel-schedule', (_, { id }) => {
+  const r = macro.cancelSchedule(id)
+  send('macro:schedules-changed', macro.listSchedules())
+  return r
+})
+
+let _scheduleTick = null
+function startScheduleTick() {
+  if (_scheduleTick) return
+  // 20s is fine for human-scheduled tasks. Bumping to 5s would feel snappier
+  // but burns wakeups; 20s means worst-case the macro fires 20s late.
+  _scheduleTick = setInterval(async () => {
+    if (macro.playerState().playing || macro.recorderState().recording) return
+    const due = macro.takeDueSchedules()
+    if (!due.length) return
+    const job = due[0]   // run one at a time to keep things sane
+    macro.markSchedule(job.id, { status: 'running', started_at: Date.now() })
+    send('macro:schedules-changed', macro.listSchedules())
+    try {
+      const r = await playMacroWithChrome(job.macro_id, { speed: job.speed })
+      macro.markSchedule(job.id, {
+        status: r?.error ? 'error' : 'done',
+        finished_at: Date.now(),
+        error: r?.error || null,
+      })
+    } catch (e) {
+      macro.markSchedule(job.id, { status: 'error', finished_at: Date.now(), error: e.message })
+    }
+    macro.clearFinishedSchedules()
+    send('macro:schedules-changed', macro.listSchedules())
+  }, 20_000)
+}
 
 // ---- Active foreground window (for skill screen-context) ----
 //
@@ -1464,6 +1578,11 @@ app.whenReady().then(async () => {
     }
   })
 
+  // Catch up on any schedules whose `when` has already passed while Scout was
+  // closed, then start the polling loop.
+  macro.clearFinishedSchedules()
+  startScheduleTick()
+
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
 
@@ -1476,8 +1595,11 @@ app.on('will-quit', () => {
   mcpClients.forEach(c => c.stop())
 })
 
-// Only fully quit when no background tasks are running
+// Only fully quit when no background tasks are running. Pending macro
+// schedules also keep Scout alive so scheduled runs fire even when the window
+// is closed (user expectation: "schedule it overnight, forget it").
 app.on('window-all-closed', () => {
-  const macroActive = macro.recorderState().recording || macro.playerState().playing
-  if (!bgAgent.running && !monitorActive && !macroActive && process.platform !== 'darwin') app.quit()
+  const macroActive    = macro.recorderState().recording || macro.playerState().playing
+  const pendingSchedule = macro.listSchedules().some(s => s.status === 'pending')
+  if (!bgAgent.running && !monitorActive && !macroActive && !pendingSchedule && process.platform !== 'darwin') app.quit()
 })

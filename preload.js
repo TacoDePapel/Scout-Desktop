@@ -57,6 +57,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   macroStopPlay:       ()                  => ipcRenderer.invoke('macro:stop-play'),
   onMacroState:        (cb)                => ipcRenderer.on('macro:state', (_e, data) => cb(data)),
 
+  // Macro scheduler — fire a saved macro at a specific datetime
+  macroListSchedules:  ()                  => ipcRenderer.invoke('macro:list-schedules'),
+  macroSchedule:       (opts)              => ipcRenderer.invoke('macro:schedule', opts),
+  macroCancelSchedule: (id)                => ipcRenderer.invoke('macro:cancel-schedule', { id }),
+  onMacroSchedules:    (cb)                => ipcRenderer.on('macro:schedules-changed', (_e, data) => cb(data)),
+
   // Active foreground window info (used to enrich recorded skills with app/route)
   getActiveWindowInfo: ()                  => ipcRenderer.invoke('system:get-window-info'),
 })

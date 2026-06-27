@@ -2545,6 +2545,24 @@ function fmtRelative(ts) {
   if (dt < 86_400_000)  return `${Math.round(dt / 3_600_000)}h ago`
   return new Date(ts).toLocaleDateString()
 }
+// "in 12 minutes" / "in 2 hours" / "at 9:15 PM" — used by scheduled-runs UI.
+function fmtUntil(ts) {
+  const dt = ts - Date.now()
+  if (dt < 0)            return 'overdue'
+  if (dt < 60_000)       return 'in <1 min'
+  if (dt < 3_600_000)    return `in ${Math.round(dt / 60_000)} min`
+  if (dt < 24 * 3_600_000) {
+    const t = new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    return `at ${t}`
+  }
+  return new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+// HTML-datetime-local helper: takes a Date, returns "YYYY-MM-DDTHH:MM" in
+// LOCAL time (NOT UTC) — what <input type="datetime-local"> expects.
+function toLocalDatetimeInput(d) {
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function macrosTab() {
   const d = document.createElement('div')
@@ -2597,6 +2615,18 @@ function macrosTab() {
     d.appendChild(warn)
     return d
   }
+
+  // Scheduled runs — only visible when there's at least one pending.
+  const schedWrap = document.createElement('div')
+  schedWrap.style.cssText = 'display:none;flex-direction:column;gap:8px;'
+  schedWrap.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px;">
+      <span class="label" style="font-size:9px;color:#E4AF7A;">Scheduled runs</span>
+      <span id="sched-count" class="label" style="font-size:9px;color:rgba(255,232,199,0.32);"></span>
+    </div>
+    <div id="sched-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+  `
+  d.appendChild(schedWrap)
 
   // Saved macros list
   const listWrap = document.createElement('div')
@@ -2675,12 +2705,27 @@ function macrosTab() {
           </div>
         </div>
       </div>
-      <div style="display:flex;gap:6px;">
-        <button class="btn btn-primary play" style="flex:1;font-size:11px;padding:6px 10px;">▶ Run with AI</button>
-        <button class="btn rename" style="font-size:11px;padding:6px 10px;">Rename</button>
-        <button class="btn del"    style="font-size:11px;padding:6px 10px;color:#F87171;">Delete</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-primary play" style="flex:1;min-width:130px;font-size:11px;padding:6px 10px;">▶ Run with AI</button>
+        <select class="speed" title="Replay speed" style="font-size:11px;padding:6px 8px;background:rgba(0,0,0,0.30);color:#FFE8C7;border:1px solid rgba(228,175,122,0.30);border-radius:6px;cursor:pointer;">
+          <option value="1">1×</option>
+          <option value="2">2×</option>
+          <option value="5">5×</option>
+        </select>
+        <button class="btn schedule" style="font-size:11px;padding:6px 10px;">Schedule</button>
+        <button class="btn rename"   style="font-size:11px;padding:6px 10px;">Rename</button>
+        <button class="btn del"      style="font-size:11px;padding:6px 10px;color:#F87171;">Delete</button>
+      </div>
+      <div class="sched-picker" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:11px;color:rgba(255,232,199,0.55);">Run at:</span>
+        <input type="datetime-local" class="when" style="flex:1;min-width:170px;font-size:11px;padding:5px 8px;background:rgba(0,0,0,0.30);color:#FFE8C7;border:1px solid rgba(228,175,122,0.30);border-radius:6px;color-scheme:dark;" />
+        <button class="btn btn-primary save-sched" style="font-size:11px;padding:5px 10px;">Save</button>
+        <button class="btn cancel-sched"           style="font-size:11px;padding:5px 10px;">Cancel</button>
       </div>
     `
+    const speedSel = row.querySelector('.speed')
+    const picker   = row.querySelector('.sched-picker')
+
     row.querySelector('.play').onclick = async () => {
       const btn = row.querySelector('.play')
       btn.disabled = true
@@ -2692,10 +2737,34 @@ function macrosTab() {
         await new Promise(r => setTimeout(r, 1000))
       }
       btn.textContent = '● Running…'
-      const r = await window.electronAPI.macroPlay(m.id, {})
+      const r = await window.electronAPI.macroPlay(m.id, { speed: Number(speedSel.value) || 1 })
       btn.disabled = false; btn.textContent = '▶ Run with AI'
       if (r?.error) alert('Playback failed: ' + r.error)
     }
+
+    row.querySelector('.schedule').onclick = () => {
+      // Toggle the picker. Default to "now + 15 minutes" rounded to the next 5.
+      if (picker.style.display === 'flex') { picker.style.display = 'none'; return }
+      const d = new Date(Date.now() + 15 * 60_000)
+      d.setSeconds(0, 0)
+      d.setMinutes(Math.ceil(d.getMinutes() / 5) * 5)
+      row.querySelector('.when').value = toLocalDatetimeInput(d)
+      picker.style.display = 'flex'
+    }
+    row.querySelector('.cancel-sched').onclick = () => { picker.style.display = 'none' }
+    row.querySelector('.save-sched').onclick = async () => {
+      const v = row.querySelector('.when').value
+      if (!v) return
+      const when = new Date(v).getTime()
+      if (!when || when < Date.now()) { alert('Pick a time in the future.'); return }
+      const r = await window.electronAPI.macroSchedule({
+        macro_id: m.id, when, speed: Number(speedSel.value) || 1,
+      })
+      if (r?.error) { alert(r.error); return }
+      picker.style.display = 'none'
+      await reloadSchedules()
+    }
+
     row.querySelector('.rename').onclick = async () => {
       const next = prompt('Rename macro:', m.name)
       if (next != null && next.trim()) {
@@ -2709,6 +2778,38 @@ function macrosTab() {
       await reloadList()
     }
     return row
+  }
+
+  async function reloadSchedules() {
+    const all = await window.electronAPI.macroListSchedules?.() || []
+    const pending = all.filter(s => s.status === 'pending' || s.status === 'running')
+    const listEl  = schedWrap.querySelector('#sched-list')
+    const countEl = schedWrap.querySelector('#sched-count')
+    if (!pending.length) { schedWrap.style.display = 'none'; return }
+    schedWrap.style.display = 'flex'
+    countEl.textContent = `${pending.length} pending`
+    listEl.innerHTML = ''
+    for (const s of pending) {
+      const r = document.createElement('div')
+      r.className = 'glass'
+      r.style.cssText = 'padding:9px 12px;display:flex;align-items:center;gap:10px;'
+      const running = s.status === 'running'
+      r.innerHTML = `
+        <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${running ? '#dc2626' : '#E4AF7A'};${running ? 'animation:pulse-dot 1s ease-in-out infinite;' : ''}"></span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;color:#FFE8C7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(s.macro_name)}</div>
+          <div style="font-size:10px;color:rgba(255,232,199,0.45);margin-top:2px;">
+            ${running ? '● Running now' : fmtUntil(s.when)} · ${s.speed || 1}× speed
+          </div>
+        </div>
+        <button class="btn cancel" style="font-size:10px;padding:4px 8px;" ${running ? 'disabled' : ''}>Cancel</button>
+      `
+      r.querySelector('.cancel').onclick = async () => {
+        await window.electronAPI.macroCancelSchedule(s.id)
+        await reloadSchedules()
+      }
+      listEl.appendChild(r)
+    }
   }
 
   // Record button: toggles state in the main process; we then re-render.
@@ -2729,12 +2830,20 @@ function macrosTab() {
   // Initial paint + reload, then re-pulse every second so the elapsed counter ticks.
   window.electronAPI.macroGetState().then(s => { macroState = s; paintHeader() })
   void reloadList()
+  void reloadSchedules()
   paintHeader()
 
+  // Listen for schedule changes pushed from main (a scheduled run firing,
+  // completing, or being cancelled from elsewhere) and re-paint.
+  const offSched = (data) => { if (view.kind === 'idle' && view.tab === 'macros') reloadSchedules() }
+  window.electronAPI.onMacroSchedules?.(offSched)
+
   const tick = setInterval(() => {
-    if (view.kind !== 'idle' || view.tab !== 'macros') { clearInterval(tick); return }
+    if (view.kind !== 'idle' || view.tab !== 'macros') { clearInterval(tick); clearInterval(schedTick); return }
     paintHeader()
   }, 700)
+  // Refresh "in N minutes" labels less often — minute resolution is plenty.
+  const schedTick = setInterval(() => reloadSchedules(), 30_000)
 
   return d
 }
