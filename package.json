@@ -26,6 +26,7 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "npmRebuild": false,
     "files": [
       "main.js",
       "preload.js",
