@@ -1,4 +1,4 @@
-// Scout Desktop — preload bridge (v2.2.0)
+// Scout Desktop — preload bridge (v2.3.0)
 // Exposes a narrow, named API to the renderer. Nothing here grants raw access
 // to Node or Electron internals — every entry is an explicit IPC channel.
 
@@ -44,4 +44,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agentSaveEnv:       (opts) => ipcRenderer.invoke('agent:save-env', opts),
   agentBrowserOpen:   (opts) => ipcRenderer.invoke('agent:browser-open', opts),
   agentBrowserAction: (opts) => ipcRenderer.invoke('agent:browser-action', opts),
+
+  // Macro mode (offline record + replay, no sign-in)
+  macroGetState:       ()                  => ipcRenderer.invoke('macro:state'),
+  macroList:           ()                  => ipcRenderer.invoke('macro:list'),
+  macroGet:            (id)                => ipcRenderer.invoke('macro:get', { id }),
+  macroDelete:         (id)                => ipcRenderer.invoke('macro:delete', { id }),
+  macroRename:         (id, name)          => ipcRenderer.invoke('macro:rename', { id, name }),
+  macroStartRecording: ()                  => ipcRenderer.invoke('macro:start-recording'),
+  macroStopRecording:  (name)              => ipcRenderer.invoke('macro:stop-recording', { name }),
+  macroPlay:           (id, opts)          => ipcRenderer.invoke('macro:play', { id, ...(opts || {}) }),
+  macroStopPlay:       ()                  => ipcRenderer.invoke('macro:stop-play'),
+  onMacroState:        (cb)                => ipcRenderer.on('macro:state', (_e, data) => cb(data)),
+
+  // Active foreground window info (used to enrich recorded skills with app/route)
+  getActiveWindowInfo: ()                  => ipcRenderer.invoke('system:get-window-info'),
 })

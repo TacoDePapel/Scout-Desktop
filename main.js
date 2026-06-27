@@ -2,7 +2,8 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, sh
 const path    = require('path')
 const fs      = require('fs')
 const os      = require('os')
-const { exec, spawn } = require('child_process')
+const { exec, spawn, execFile } = require('child_process')
+const macro   = require('./lib/macro')
 
 // Disable hardware acceleration unconditionally. Fixes pitch-black windows on:
 //   - Windows: certain GPU/driver combos that fail to composite
@@ -85,7 +86,7 @@ class MCPClient {
         this._rpc('initialize', {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          clientInfo: { name: 'Scout', version: '2.2.0' },
+          clientInfo: { name: 'Scout', version: '2.3.0' },
         })
           .then(() => {
             this.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
@@ -1020,15 +1021,36 @@ function buildTrayIcon() {
 }
 
 function buildTrayMenu() {
+  const recState = macro.recorderState()
+  const plyState = macro.playerState()
+  const macroLabel = recState.recording
+    ? `⏺ Macro recording · ${recState.event_count} events`
+    : plyState.playing
+      ? `▶ Replaying: ${plyState.name || 'macro'}`
+      : macro.isAvailable() ? 'Macros idle' : 'Macros: native lib missing'
+
   return Menu.buildFromTemplate([
     { label: 'Open Scout',        click: () => { if (!mainWindow) createWindow(); else { mainWindow.show(); mainWindow.focus() } } },
     { type: 'separator' },
     { label: bgAgent.running    ? '⚙ Agent running…'  : 'Agent idle',    enabled: false },
     { label: monitorActive      ? '● Monitor active'  : 'Monitor off',   enabled: false },
+    { label: macroLabel,         enabled: false },
     { label: `MCP: ${mcpClients.size} server${mcpClients.size !== 1 ? 's' : ''}`, enabled: false },
     { type: 'separator' },
     { label: 'Stop Agent',        enabled: bgAgent.running,    click: () => { bgAgent.running = false; bgAgent.wasStopped = true; updateTray() } },
     { label: monitorActive ? 'Stop Monitor' : 'Start Monitor', click: () => { monitorActive ? stopMonitor() : startMonitor() } },
+    { label: recState.recording
+        ? 'Stop Macro Recording'
+        : plyState.playing
+          ? 'Stop Macro Playback'
+          : 'Start Macro Recording',
+      enabled: macro.isAvailable(),
+      click: () => {
+        if (recState.recording) macro.stopRecording()
+        else if (plyState.playing) macro.stopPlay()
+        else macro.startRecording()
+        pushMacroState()
+      } },
     { label: agentBrowserVisible ? 'Hide Agent Browser' : 'Show Agent Browser',
       enabled: !!(agentBrowser && !agentBrowser.isDestroyed()),
       click: () => setAgentBrowserVisible(!agentBrowserVisible) },
@@ -1144,9 +1166,9 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'))
 
-  // Keep alive in tray when window is closed (if agent/monitor active)
+  // Keep alive in tray when window is closed (if agent/monitor/macro active)
   mainWindow.on('close', e => {
-    if (bgAgent.running || monitorActive) {
+    if (bgAgent.running || monitorActive || macro.recorderState().recording || macro.playerState().playing) {
       e.preventDefault()
       mainWindow.hide()
     }
@@ -1226,6 +1248,106 @@ ipcMain.handle('agent:start-bg', async (_, { task, token }) => {
 })
 ipcMain.handle('agent:stop-bg', () => { bgAgent.running = false; bgAgent.wasStopped = true; return { ok: true } })
 ipcMain.handle('agent:get-state', () => ({ running: bgAgent.running, task: bgAgent.task, startedAt: bgAgent.startedAt }))
+
+// ---- Macro mode (local-only record + replay) ----
+
+function pushMacroState() {
+  send('macro:state', {
+    available: macro.isAvailable(),
+    loadError: macro.getLoadError(),
+    recorder:  macro.recorderState(),
+    player:    macro.playerState(),
+  })
+  updateTray()
+}
+
+ipcMain.handle('macro:state', () => ({
+  available: macro.isAvailable(),
+  loadError: macro.getLoadError(),
+  recorder:  macro.recorderState(),
+  player:    macro.playerState(),
+}))
+ipcMain.handle('macro:list',            ()                 => macro.listMacros())
+ipcMain.handle('macro:get',             (_, { id })        => macro.getMacro(id))
+ipcMain.handle('macro:delete',          (_, { id })        => macro.deleteMacro(id))
+ipcMain.handle('macro:rename',          (_, { id, name })  => macro.renameMacro(id, name))
+ipcMain.handle('macro:start-recording', ()                 => { const r = macro.startRecording(); pushMacroState(); return r })
+ipcMain.handle('macro:stop-recording',  (_, { name } = {}) => { const r = macro.stopRecording(name); pushMacroState(); return r })
+ipcMain.handle('macro:play', async (_, { id, speed, hideWindow }) => {
+  pushMacroState()
+  // Hide Scout's window so a maximized Scout doesn't sit on top of whatever
+  // app the macro is targeting. The user can opt out with hideWindow:false.
+  const shouldHide = hideWindow !== false
+  if (shouldHide && mainWindow && mainWindow.isVisible()) {
+    try { mainWindow.minimize() } catch {}
+  }
+  const r = await macro.play(id, { speed })
+  pushMacroState()
+  if (shouldHide && mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.restore(); mainWindow.focus() } catch {}
+  }
+  return r
+})
+ipcMain.handle('macro:stop-play', () => { const r = macro.stopPlay(); pushMacroState(); return r })
+
+// ---- Active foreground window (for skill screen-context) ----
+//
+// Returns { app, title } for the currently focused window. Used by the
+// recorder to bake "this skill was recorded inside <app>" into the prompt
+// passed to generate-skill, so Claude can mention the app/route in the .md.
+ipcMain.handle('system:get-window-info', () => getActiveWindowInfo())
+
+function getActiveWindowInfo() {
+  return new Promise(resolve => {
+    if (IS_WIN) {
+      // PowerShell + Win32 P/Invoke. Lighter than pulling in a native module.
+      const ps = `
+        $code = @"
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public class W {
+            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint procId);
+          }
+"@
+        Add-Type $code -ErrorAction SilentlyContinue
+        $h = [W]::GetForegroundWindow()
+        $sb = New-Object Text.StringBuilder 1024
+        [W]::GetWindowText($h, $sb, 1024) | Out-Null
+        $title = $sb.ToString()
+        $procId = 0
+        [W]::GetWindowThreadProcessId($h, [ref]$procId) | Out-Null
+        try { $p = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch { $p = "" }
+        Write-Output ("{0}|{1}" -f $p, $title)
+      `
+      execFile('powershell.exe', ['-NoProfile','-NonInteractive','-Command', ps], { timeout: 3000 }, (err, stdout) => {
+        if (err) return resolve(null)
+        const line = (stdout || '').trim().split('\n').pop() || ''
+        const [appName, ...rest] = line.split('|')
+        resolve({ app: (appName || '').trim(), title: rest.join('|').trim() })
+      })
+    } else if (IS_MAC) {
+      const osa = `osascript -e 'tell application "System Events" to set frontApp to name of first application process whose frontmost is true' -e 'tell application "System Events" to tell process frontApp to set t to name of front window' -e '"" & frontApp & "|" & t'`
+      exec(osa, { timeout: 3000 }, (err, stdout) => {
+        if (err) return resolve(null)
+        const line = (stdout || '').trim()
+        const [appName, ...rest] = line.split('|')
+        resolve({ app: appName?.trim() || '', title: rest.join('|').trim() })
+      })
+    } else {
+      // Linux: xdotool if present, else nothing.
+      exec(`xdotool getactivewindow getwindowname; xdotool getactivewindow getwindowpid`, { timeout: 3000 }, (err, stdout) => {
+        if (err) return resolve(null)
+        const [title, pid] = (stdout || '').trim().split('\n')
+        if (!pid) return resolve({ app: '', title: title || '' })
+        exec(`ps -p ${pid} -o comm=`, { timeout: 2000 }, (e2, out2) =>
+          resolve({ app: (out2 || '').trim(), title: title || '' }))
+      })
+    }
+  })
+}
 
 // Monitor
 ipcMain.handle('monitor:toggle', (_, { active }) => { active ? startMonitor() : stopMonitor(); return { active: monitorActive } })
@@ -1312,6 +1434,36 @@ app.whenReady().then(async () => {
     if (!mainWindow || !mainWindow.isVisible()) { if (!mainWindow) createWindow(); mainWindow.show(); mainWindow.focus() }
   })
 
+  // Alt+Shift+K = toggle macro recording (K = "keystrokes"). Doubles as the
+  // "stop playback" key during replay so the user can always bail out without
+  // touching the mouse — useful when a macro is wandering across the screen.
+  globalShortcut.register('Alt+Shift+K', () => {
+    if (!macro.isAvailable()) {
+      // Surface the install error in the renderer so the user sees what's wrong.
+      if (!mainWindow) createWindow()
+      else { mainWindow.show(); mainWindow.focus() }
+      send('macro:state', {
+        available: false,
+        loadError: macro.getLoadError(),
+        recorder:  macro.recorderState(),
+        player:    macro.playerState(),
+      })
+      return
+    }
+    if (macro.recorderState().recording)   macro.stopRecording()
+    else if (macro.playerState().playing)  macro.stopPlay()
+    else                                   macro.startRecording()
+    pushMacroState()
+  })
+
+  // Alt+Shift+Esc = abort macro playback only (doesn't toggle recording).
+  globalShortcut.register('Alt+Shift+Escape', () => {
+    if (macro.playerState().playing) {
+      macro.stopPlay()
+      pushMacroState()
+    }
+  })
+
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
 
@@ -1326,5 +1478,6 @@ app.on('will-quit', () => {
 
 // Only fully quit when no background tasks are running
 app.on('window-all-closed', () => {
-  if (!bgAgent.running && !monitorActive && process.platform !== 'darwin') app.quit()
+  const macroActive = macro.recorderState().recording || macro.playerState().playing
+  if (!bgAgent.running && !monitorActive && !macroActive && process.platform !== 'darwin') app.quit()
 })

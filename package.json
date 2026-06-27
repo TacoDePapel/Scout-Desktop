@@ -1,17 +1,22 @@
 {
   "name": "scout-desktop",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Scout — AI workflow capture and desktop agent by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
   "scripts": {
     "start": "electron .",
     "gen-icon": "node scripts/gen-icon.js",
+    "postinstall": "electron-builder install-app-deps || echo \"postinstall: native rebuild skipped (this is OK if you see no errors at runtime - uiohook-napi and libnut ship N-API prebuilts that work in Electron without rebuild)\"",
     "dist": "npm run gen-icon && electron-builder",
     "dist:win": "npm run gen-icon && electron-builder --win",
     "dist:mac": "npm run gen-icon && electron-builder --mac",
     "dist:linux": "npm run gen-icon && electron-builder --linux",
     "dist:all": "npm run gen-icon && electron-builder -mwl"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.2",
+    "uiohook-napi": "^1.5.4"
   },
   "build": {
     "appId": "agency.orage.scout",
@@ -28,10 +33,16 @@
       "index.html",
       "overlay.html",
       "app.css",
+      "lib/**/*",
       "vendor/**/*",
       "build/icon.png",
       "build/trayTemplate.png",
       "build/trayTemplate@2x.png"
+    ],
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**",
+      "node_modules/@nut-tree-fork/**",
+      "node_modules/libnut*/**"
     ],
     "win": {
       "target": [

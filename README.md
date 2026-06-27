@@ -7,6 +7,12 @@
 
 ## What's New
 
+**June 27, 2026 — v2.3.0**
+- **Macro Mode — record and replay your clicks and keystrokes, no sign-in needed.** New "Macros" tab. Hit the big record button (or `Alt+Shift+K` from anywhere), do whatever you want — fill a form, click through a checkout, navigate an app — then hit it again to save. Every saved macro gets a `▶ Run with AI` button that replays the exact sequence at the original speed. Scout minimizes itself, counts down 3 → 2 → 1, then drives your mouse and keyboard.
+- **Local-only, offline.** Macros live as plain JSON in your user-data folder. Nothing touches Supabase. Recording works whether you're signed in or not.
+- **Active-window awareness.** Recorded skills now know which app and window were focused when you started and stopped, so the AI-generated guide can mention the app/route by name.
+- **Bail-out hotkey.** `Alt+Shift+Esc` aborts any macro mid-replay if it starts going somewhere you don't want.
+
 **June 7, 2026 — v2.2.0**
 - **Quality pass across the whole app.** Tightened copy in the UI, sharper log messages, cleaner comments, and a refreshed download page. No behavior changes — every feature works the same, just nicer to read and easier to follow.
 - **Docs refresh.** README, release notes, and the public download page are now consistent with the current feature set and the latest version on disk.

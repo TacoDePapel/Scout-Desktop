@@ -1,4 +1,4 @@
-// Scout Desktop — renderer.js (v2.2.0)
+// Scout Desktop — renderer.js (v2.3.0)
 
 // IIFE wraps the whole file so `let supabase` doesn't collide with the
 // global `var supabase` exported by vendor/supabase.min.js (UMD).
@@ -159,11 +159,21 @@ async function processRecording(rec, extraContext) {
     view = { kind: 'processing', recording: rec, stage: 'drafting', error: null }
     render()
 
-    // 4. Generate skill — SSE stream
+    // 4. Generate skill — SSE stream.
+    // Merge auto-captured screen context (focused app/window) with any
+    // user-supplied extra text so the edge function gets both in one field.
+    const auto = buildScreenContext(rec)
+    const mergedExtra = [auto, (extraContext || '').trim()].filter(Boolean).join('\n\n')
     const skillRes = await fetch(`${SUPABASE_URL}/functions/v1/generate-skill`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body:    JSON.stringify({ recording_id: rec.id, ...(extraContext ? { extra: extraContext } : {}) }),
+      body:    JSON.stringify({
+        recording_id: rec.id,
+        ...(mergedExtra ? { extra: mergedExtra } : {}),
+        ...(rec._window_at_start || rec._window_at_end
+            ? { screen_context: { start: rec._window_at_start, end: rec._window_at_end, platform: PLATFORM.label } }
+            : {}),
+      }),
     })
     if (!skillRes.ok) {
       const body = await skillRes.json().catch(() => ({}))
@@ -176,8 +186,8 @@ async function processRecording(rec, extraContext) {
     if (ct.includes('text/event-stream')) {
       const reader = skillRes.body.getReader()
       const dec = new TextDecoder()
-      let buf = '', accumulated = ''
-      while (true) {
+      let buf = '', accumulated = '', streamError = null
+      outer: while (true) {
         const { done, value } = await reader.read()
         if (done) break
         buf += dec.decode(value, { stream: true })
@@ -185,20 +195,22 @@ async function processRecording(rec, extraContext) {
         buf = lines.pop()
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
-          try {
-            const evt = JSON.parse(line.slice(6))
-            if (evt.type === 'skill_chunk') {
-              accumulated += evt.text
-              const el = document.getElementById('live-skill-text')
-              if (el) el.textContent = accumulated
-            } else if (evt.type === 'done') {
-              finalSkill = evt; allSkills = evt.all || [evt]
-            } else if (evt.type === 'error') {
-              throw new Error(evt.message)
-            }
-          } catch {}
+          let evt
+          try { evt = JSON.parse(line.slice(6)) } catch { continue }
+          if (evt.type === 'skill_chunk') {
+            accumulated += evt.text
+            const el = document.getElementById('live-skill-text')
+            if (el) el.textContent = accumulated
+          } else if (evt.type === 'done') {
+            finalSkill = evt
+            allSkills = evt.all || [evt]
+          } else if (evt.type === 'error') {
+            streamError = evt.message || 'Unknown skill-generation error'
+            break outer
+          }
         }
       }
+      if (streamError) throw new Error(streamError)
     } else {
       const json = await skillRes.json()
       allSkills = json.all || (json.id ? [json] : [])
@@ -460,6 +472,7 @@ function bottomNav(active) {
   const tabs = [
     { id: 'record',   label: 'Record',  icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>` },
     { id: 'agent',    label: 'Agent',   icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5" stroke-linecap="round"/></svg>` },
+    { id: 'macros',   label: 'Macros',  icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" stroke-linecap="round"/></svg>` },
     { id: 'monitor',  label: 'Monitor', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4" stroke-linecap="round"/></svg>` },
     { id: 'library',  label: 'Library', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>` },
     { id: 'settings', label: 'Account', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7" stroke-linecap="round"/></svg>` },
@@ -592,6 +605,7 @@ function authView({ step, email }) {
 function idleView(tab) {
   if (tab === 'record')   return recordTab()
   if (tab === 'agent')    return agentTab()
+  if (tab === 'macros')   return macrosTab()
   if (tab === 'monitor')  return monitorTab()
   if (tab === 'library')  return libraryTab()
   return settingsTab()
@@ -804,9 +818,22 @@ async function startRecording() {
       _recorder: recorder, _chunks: chunks,
       _audioRecorder: audioRecorder, _audioChunks: audioChunks,
       _screenStream: screenStream, _micStream: micStream,
+      window_at_start: null,
+      window_at_end:   null,
     },
   }
   view.state._speechRec = startSpeechRecognition()
+
+  // Screen context — capture which app/window was focused at recording start
+  // so the generated .md can name the route ("In Notion, the Settings page…").
+  // Snapshot a moment after start so the user's own click on Scout's record
+  // button isn't what we capture as "the focused window".
+  setTimeout(async () => {
+    try {
+      const w = await window.electronAPI.getActiveWindowInfo?.()
+      if (w && view.kind === 'recording') view.state.window_at_start = w
+    } catch {}
+  }, 800)
 
   // Insert the recording row up front so screenshot events can FK-reference it.
   // Status starts as 'recording' and is updated on stop.
@@ -842,7 +869,12 @@ async function startRecording() {
 
 async function doStopRecording() {
   if (view.kind !== 'recording') return
-  const { _recorder, _chunks, _audioRecorder, _audioChunks, _screenStream, _micStream, recording_id, started_at, paused_ms, mode } = view.state
+  const { _recorder, _chunks, _audioRecorder, _audioChunks, _screenStream, _micStream, recording_id, started_at, paused_ms, mode, window_at_start } = view.state
+
+  // Capture the focused window NOW (before we steal focus by tearing down
+  // streams) so the skill prompt can note where the user finished.
+  let window_at_end = null
+  try { window_at_end = await window.electronAPI.getActiveWindowInfo?.() } catch {}
 
   stopRecordingLoops()
   void window.electronAPI.overlayHide?.()
@@ -878,10 +910,32 @@ async function doStopRecording() {
     _blob:       audioBlob || new Blob(_chunks, { type: 'video/webm' }),
     _isAudioOnly: !!audioBlob,
     _speechTranscript: view.state.live_transcript || '',
+    _window_at_start: window_at_start || null,
+    _window_at_end:   window_at_end   || null,
   }
 
   // No-friction: skip the extra_context step. Auto-generate skill.
   void processRecording(rec)
+}
+
+// Build a small text block describing where the user was on screen during
+// recording. Fed to generate-skill via the existing `extra` field so the
+// edge function (which already concatenates `extra` into its system prompt)
+// surfaces it to Claude without any backend changes.
+function buildScreenContext(rec) {
+  const lines = []
+  const fmt = (w) => w && (w.app || w.title) ? `${w.app || 'unknown app'} — "${w.title || ''}"` : null
+  const start = fmt(rec._window_at_start)
+  const end   = fmt(rec._window_at_end)
+  if (start) lines.push(`- Focused app at recording start: ${start}`)
+  if (end && end !== start) lines.push(`- Focused app at recording end:   ${end}`)
+  if (!lines.length) return ''
+  return [
+    'Screen context (auto-captured by Scout):',
+    ...lines,
+    `- Platform: ${PLATFORM.label}`,
+    'Use these to mention the app/route in the skill title and steps when relevant.',
+  ].join('\n')
 }
 
 // ---- Screenshot loop (sample frames from the screen stream → screenshots bucket) ----
@@ -1456,7 +1510,7 @@ function settingsTab() {
 
     <div class="glass" style="padding:16px;">
       <div class="label" style="font-size:9px;margin-bottom:4px;">Version</div>
-      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.2.0 · Orage AI Agency · Desktop</div>
+      <div style="font-size:12px;color:rgba(255,232,199,0.45);">Scout v2.3.0 · Orage AI Agency · Desktop</div>
     </div>
   `
 
@@ -2185,6 +2239,14 @@ function initMainProcessListeners() {
     if (ct) ct.textContent = `${data.total} frame${data.total !== 1 ? 's' : ''} captured`
   })
 
+  // Macro state — pushed from main when record/play starts or stops, OR when
+  // a hotkey or tray click triggers a state change. Re-render the Macros tab
+  // if it's the current view so the big record button + list stay in sync.
+  window.electronAPI.onMacroState(data => {
+    macroState = data
+    if (view.kind === 'idle' && view.tab === 'macros') render()
+  })
+
   window.electronAPI.onMonitorStatus(data => {
     monitorActive = data.active
     const btn = document.getElementById('monitor-toggle-btn')
@@ -2463,6 +2525,220 @@ function bgAgentRunningView() {
   return d
 }
 
+// ---- Macros tab (local-only record/replay; no sign-in) ----
+
+// Mirrors the macro state from the main process. Updated by `onMacroState`
+// pushes from main.js so other tabs reflect current recording / playback.
+let macroState = { available: true, loadError: null, recorder: { recording: false }, player: { playing: false } }
+
+function fmtDuration(ms) {
+  if (!ms || ms < 1000) return `${ms || 0} ms`
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60), r = s % 60
+  return `${m}m ${r}s`
+}
+function fmtRelative(ts) {
+  const dt = Date.now() - ts
+  if (dt < 60_000)      return 'just now'
+  if (dt < 3_600_000)   return `${Math.round(dt / 60_000)}m ago`
+  if (dt < 86_400_000)  return `${Math.round(dt / 3_600_000)}h ago`
+  return new Date(ts).toLocaleDateString()
+}
+
+function macrosTab() {
+  const d = document.createElement('div')
+  d.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:16px;'
+
+  // Header card: big record button + live state
+  const headerCard = document.createElement('div')
+  headerCard.className = 'glass'
+  headerCard.style.cssText = 'padding:18px;display:flex;flex-direction:column;gap:14px;align-items:center;'
+  headerCard.innerHTML = `
+    <div style="text-align:center;">
+      <div class="display" style="font-size:18px;color:#E4AF7A;">Macro Mode</div>
+      <p style="font-size:11px;line-height:1.6;margin-top:4px;color:rgba(255,232,199,0.50);max-width:280px;">
+        Record your clicks and keystrokes, replay them exactly. No sign-in, runs in the background.
+      </p>
+    </div>
+    <button id="macro-rec-btn" style="
+      width:120px;height:120px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(160deg,#D4924A 0%,#9A6228 55%,#7A4A18 100%);
+      border:1px solid rgba(228,175,122,0.65);
+      box-shadow:0 1px 0 rgba(255,255,255,0.20) inset,0 -2px 0 rgba(0,0,0,0.32) inset,0 10px 40px rgba(182,128,57,0.44);
+      cursor:pointer;transition:transform 0.15s;">
+      <span id="macro-rec-icon" style="display:block;width:38px;height:38px;border-radius:50%;background:linear-gradient(180deg,#2a1506 0%,#1a0e02 100%);box-shadow:0 2px 8px rgba(0,0,0,0.60) inset;"></span>
+    </button>
+    <div id="macro-state-text" style="font-size:11px;color:rgba(255,232,199,0.55);text-align:center;min-height:14px;"></div>
+    <div style="font-size:9px;color:rgba(255,232,199,0.32);letter-spacing:0.10em;text-transform:uppercase;text-align:center;">
+      Hotkey · Alt + Shift + K
+    </div>
+  `
+  d.appendChild(headerCard)
+
+  // If native libs missing, show install hint and bail out (no list shown).
+  if (macroState.available === false) {
+    const warn = document.createElement('div')
+    warn.className = 'glass'
+    warn.style.cssText = 'padding:14px 16px;border-color:rgba(248,113,113,0.35);'
+    warn.innerHTML = `
+      <div class="label" style="font-size:9px;color:#F87171;margin-bottom:6px;">Macro engine missing</div>
+      <div style="font-size:11px;line-height:1.6;color:rgba(255,232,199,0.65);margin-bottom:8px;">
+        Scout needs two small native libraries to capture and replay input.
+      </div>
+      <div style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;background:rgba(0,0,0,0.30);padding:8px 10px;border-radius:4px;color:#FFE8C7;line-height:1.5;">
+        cd to the Scout folder<br/>
+        npm install
+      </div>
+      <div style="font-size:10px;line-height:1.6;color:rgba(255,232,199,0.40);margin-top:8px;">
+        ${escapeHtml(macroState.loadError || 'Native module not loaded.')}
+      </div>
+    `
+    d.appendChild(warn)
+    return d
+  }
+
+  // Saved macros list
+  const listWrap = document.createElement('div')
+  listWrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;'
+  const listHeader = document.createElement('div')
+  listHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:0 4px;'
+  listHeader.innerHTML = `
+    <span class="label" style="font-size:9px;">Saved macros</span>
+    <span id="macro-count" class="label" style="font-size:9px;color:rgba(255,232,199,0.32);"></span>
+  `
+  listWrap.appendChild(listHeader)
+
+  const listEl = document.createElement('div')
+  listEl.id = 'macro-list'
+  listEl.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+  listWrap.appendChild(listEl)
+  d.appendChild(listWrap)
+
+  // ---- State render helpers ----
+
+  const recBtn   = headerCard.querySelector('#macro-rec-btn')
+  const recIcon  = headerCard.querySelector('#macro-rec-icon')
+  const stateTxt = headerCard.querySelector('#macro-state-text')
+
+  function paintHeader() {
+    const rec = macroState.recorder?.recording
+    const ply = macroState.player?.playing
+    if (rec) {
+      recBtn.style.background  = 'linear-gradient(160deg,#dc2626 0%,#991b1b 55%,#7f1d1d 100%)'
+      recBtn.style.boxShadow   = '0 1px 0 rgba(255,255,255,0.20) inset,0 -2px 0 rgba(0,0,0,0.32) inset,0 10px 40px rgba(220,38,38,0.55)'
+      recIcon.style.borderRadius = '6px'
+      recIcon.style.width  = '32px'
+      recIcon.style.height = '32px'
+      const elapsed = Math.max(0, Date.now() - (macroState.recorder.started_at || Date.now()))
+      stateTxt.textContent = `Recording · ${fmtDuration(elapsed)} · ${macroState.recorder.event_count || 0} events`
+    } else if (ply) {
+      recIcon.style.borderRadius = '50%'
+      recIcon.style.width  = '38px'
+      recIcon.style.height = '38px'
+      stateTxt.textContent = `Replaying: ${macroState.player.name || 'macro'}`
+    } else {
+      recBtn.style.background  = 'linear-gradient(160deg,#D4924A 0%,#9A6228 55%,#7A4A18 100%)'
+      recBtn.style.boxShadow   = '0 1px 0 rgba(255,255,255,0.20) inset,0 -2px 0 rgba(0,0,0,0.32) inset,0 10px 40px rgba(182,128,57,0.44)'
+      recIcon.style.borderRadius = '50%'
+      recIcon.style.width  = '38px'
+      recIcon.style.height = '38px'
+      stateTxt.textContent = 'Ready'
+    }
+  }
+
+  async function reloadList() {
+    const macros = await window.electronAPI.macroList()
+    listEl.innerHTML = ''
+    document.getElementById('macro-count').textContent =
+      `${macros.length} macro${macros.length !== 1 ? 's' : ''}`
+    if (!macros.length) {
+      const empty = document.createElement('div')
+      empty.style.cssText = 'padding:24px 16px;text-align:center;font-size:11px;color:rgba(255,232,199,0.36);line-height:1.7;'
+      empty.innerHTML = `No macros yet.<br/>Hit the record button above to capture your first one.`
+      listEl.appendChild(empty)
+      return
+    }
+    for (const m of macros) listEl.appendChild(renderRow(m))
+  }
+
+  function renderRow(m) {
+    const row = document.createElement('div')
+    row.className = 'glass'
+    row.style.cssText = 'padding:12px 14px;display:flex;flex-direction:column;gap:8px;'
+    row.innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+        <div style="flex:1;min-width:0;">
+          <div class="macro-name" style="font-size:13px;color:#FFE8C7;font-weight:500;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</div>
+          <div style="font-size:10px;color:rgba(255,232,199,0.40);margin-top:3px;">
+            ${fmtDuration(m.duration_ms)} · ${m.event_count} events · ${fmtRelative(m.created_at)}
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-primary play" style="flex:1;font-size:11px;padding:6px 10px;">▶ Run with AI</button>
+        <button class="btn rename" style="font-size:11px;padding:6px 10px;">Rename</button>
+        <button class="btn del"    style="font-size:11px;padding:6px 10px;color:#F87171;">Delete</button>
+      </div>
+    `
+    row.querySelector('.play').onclick = async () => {
+      const btn = row.querySelector('.play')
+      btn.disabled = true
+      // Visible 3-2-1 countdown so the user's hands can leave the keyboard
+      // before synthesized input starts flying. Scout's window also minimizes
+      // (main.js macro:play handler) so the cursor isn't fighting our UI.
+      for (let n = 3; n >= 1; n--) {
+        btn.textContent = `Running in ${n}…`
+        await new Promise(r => setTimeout(r, 1000))
+      }
+      btn.textContent = '● Running…'
+      const r = await window.electronAPI.macroPlay(m.id, {})
+      btn.disabled = false; btn.textContent = '▶ Run with AI'
+      if (r?.error) alert('Playback failed: ' + r.error)
+    }
+    row.querySelector('.rename').onclick = async () => {
+      const next = prompt('Rename macro:', m.name)
+      if (next != null && next.trim()) {
+        await window.electronAPI.macroRename(m.id, next.trim())
+        await reloadList()
+      }
+    }
+    row.querySelector('.del').onclick = async () => {
+      if (!confirm(`Delete "${m.name}"? This can't be undone.`)) return
+      await window.electronAPI.macroDelete(m.id)
+      await reloadList()
+    }
+    return row
+  }
+
+  // Record button: toggles state in the main process; we then re-render.
+  // No-friction: auto-name on stop. User can rename later from the list.
+  recBtn.onclick = async () => {
+    if (macroState.recorder?.recording) {
+      const auto = `Macro · ${new Date().toLocaleString()}`
+      await window.electronAPI.macroStopRecording(auto)
+      await reloadList()
+    } else if (macroState.player?.playing) {
+      await window.electronAPI.macroStopPlay()
+    } else {
+      const r = await window.electronAPI.macroStartRecording()
+      if (r?.error) alert(r.error)
+    }
+  }
+
+  // Initial paint + reload, then re-pulse every second so the elapsed counter ticks.
+  window.electronAPI.macroGetState().then(s => { macroState = s; paintHeader() })
+  void reloadList()
+  paintHeader()
+
+  const tick = setInterval(() => {
+    if (view.kind !== 'idle' || view.tab !== 'macros') { clearInterval(tick); return }
+    paintHeader()
+  }, 700)
+
+  return d
+}
+
 // ---- Monitor tab ----
 
 function monitorTab() {
@@ -2727,6 +3003,7 @@ void (async () => {
   // Load initial state from main process
   window.electronAPI.getMCPStatus().then(s => { mcpStatus = s })
   window.electronAPI.getMonitorStatus().then(s => { monitorActive = s.active })
+  window.electronAPI.macroGetState?.().then(s => { if (s) macroState = s })
   window.electronAPI.getAgentState().then(s => {
     if (s.running) { bgAgentRunning = true; bgAgentTask = s.task; view = { kind: 'agent-bg-running' }; render() }
   })
