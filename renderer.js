@@ -92,12 +92,129 @@ async function loadLibraryData() {
   }
 }
 
+// ---- Local skill pipeline (no Supabase) ----
+//
+// When the hosted backend is unreachable, the whole record→skill flow can
+// still run: the transcript was captured live in this renderer, keyframes
+// come straight out of the video blob, and skill generation is a single
+// direct Claude call through the main process. The skill lives in memory
+// (Copy / Save .md / Run automatically all work); it just isn't synced.
+
+async function extractKeyframes(blob, count = 4) {
+  if (!blob || !blob.size) return []
+  const url = URL.createObjectURL(blob)
+  try {
+    const video = document.createElement('video')
+    video.muted = true; video.src = url
+    await new Promise((res, rej) => {
+      video.onloadedmetadata = res
+      video.onerror = () => rej(new Error('video load failed'))
+      setTimeout(() => rej(new Error('video load timeout')), 8000)
+    })
+    // MediaRecorder blobs often report Infinity until seeked far forward.
+    if (!isFinite(video.duration)) {
+      video.currentTime = 1e9
+      await new Promise(r => { video.onseeked = r; setTimeout(r, 2000) })
+    }
+    const dur = isFinite(video.duration) ? video.duration : 0
+    if (!dur || !video.videoWidth) return []
+    const canvas = document.createElement('canvas')
+    const scale = Math.min(1, 1280 / video.videoWidth)
+    canvas.width  = Math.round(video.videoWidth * scale)
+    canvas.height = Math.round(video.videoHeight * scale)
+    const ctx = canvas.getContext('2d')
+    const frames = []
+    for (let i = 0; i < count; i++) {
+      video.currentTime = dur * (i + 0.5) / count
+      await new Promise(r => { video.onseeked = r; setTimeout(r, 1500) })
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      frames.push(canvas.toDataURL('image/jpeg', 0.7).split(',')[1])
+    }
+    return frames
+  } catch (e) {
+    console.warn('Keyframe extraction failed:', e)
+    return []
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+const LOCAL_SKILL_SYSTEM = `You turn a screen recording of a user performing a task into a reusable "skill" — a step-by-step guide another person or an AI agent can follow to repeat the task.
+
+Output ONLY the skill markdown, exactly in this format (no preamble, no code fence around the whole thing):
+
+---
+name: kebab-case-slug
+version: 1
+description: One sentence describing what this skill accomplishes.
+---
+
+# Title In Plain Words
+
+## Goal
+One or two sentences on the outcome.
+
+## Steps
+1. Numbered, concrete steps. Name the exact apps, buttons, URLs and values visible in the evidence. Use {placeholders} for values that will change run to run.
+
+## Done when
+The observable condition that proves the task succeeded.
+
+Base every step on the evidence provided (screenshots, narration, window titles). If the evidence is thin, produce fewer, broader steps rather than inventing details.`
+
+async function processRecordingLocal(rec, extraContext) {
+  view = { kind: 'processing', recording: rec, stage: 'drafting', error: null }
+  render()
+  try {
+    const speechText = (rec._speechTranscript || '').trim()
+    const auto = buildScreenContext(rec)
+    const mergedExtra = [auto, (extraContext || '').trim()].filter(Boolean).join('\n\n')
+    const frames = await extractKeyframes(rec._blob)
+
+    const content = []
+    for (const f of frames) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f } })
+    content.push({ type: 'text', text:
+`Recording: "${rec.title || 'Untitled'}" — ${Math.round((rec.duration_ms || 0) / 1000)}s.
+${frames.length ? `The ${frames.length} screenshots above are keyframes from the recording, in order.` : 'No screenshots available.'}
+${speechText ? `\nUser narration:\n${speechText}` : '\nNo narration was captured.'}
+${mergedExtra ? `\nContext:\n${mergedExtra}` : ''}
+
+Write the skill.` })
+
+    const r = await window.electronAPI.agentComplete({ system: LOCAL_SKILL_SYSTEM, content })
+    if (r?.error === 'need_key') throw new Error('No Anthropic API key set. Run any macro with "Run in background" once to add it.')
+    if (r?.error) throw new Error(r.error)
+    const body_md = (r.text || '').trim()
+    if (!body_md) throw new Error('Skill generation returned no content.')
+
+    const title = (body_md.match(/^#\s+(.+)$/m)?.[1] || rec.title || 'Untitled skill').trim()
+    const skill = {
+      id: 'local-' + Date.now().toString(36),
+      recording_id: rec.id,
+      user_id: currentUser?.id,
+      version: 1,
+      kind: rec.mode ?? 'skill',
+      title,
+      body_md,
+      created_at: new Date().toISOString(),
+    }
+    view = { kind: 'skill', recording: { ...rec, title, status: 'ready', skills: [skill] }, skill, allSkills: [skill] }
+  } catch (err) {
+    console.error('Local processing failed:', err)
+    view = { kind: 'processing', recording: rec, stage: 'drafting', error: err.message }
+  }
+  render()
+}
+
 async function processRecording(rec, extraContext) {
   if (!supabase || !currentUser) {
     view = { kind: 'idle', tab: 'library' }
     render()
     return
   }
+
+  // Known-dead backend: don't waste time on uploads that will fail.
+  if (supabaseUnreachable) return processRecordingLocal(rec, extraContext)
 
   const { data: sessionData } = await supabase.auth.getSession()
   const token = SUPABASE_ANON_KEY
@@ -239,6 +356,12 @@ async function processRecording(rec, extraContext) {
     render()
   } catch (err) {
     console.error('Processing failed:', err)
+    // Network-level failure (offline backend) — switch to the local pipeline
+    // instead of surfacing a dead-end error.
+    if (/failed to fetch|network|fetch failed/i.test(err.message || '')) {
+      supabaseUnreachable = true
+      return processRecordingLocal(rec, extraContext)
+    }
     view = { kind: 'processing', recording: rec, stage: 'uploading', error: err.message }
     render()
   }

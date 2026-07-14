@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Background agent (runs in main process — survives minimize)
   startAgentBg:  (opts) => ipcRenderer.invoke('agent:start-bg', opts),
+  agentComplete: (opts) => ipcRenderer.invoke('agent:complete', opts),
   stopAgentBg:   ()     => ipcRenderer.invoke('agent:stop-bg'),
   getAgentState: ()     => ipcRenderer.invoke('agent:get-state'),
   onAgentUpdate: (cb)   => ipcRenderer.on('agent:update', (_e, data) => cb(data)),

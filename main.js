@@ -1264,6 +1264,32 @@ ipcMain.handle('agent:start-bg', async (_, { task, token }) => {
   return { ok: true }
 })
 ipcMain.handle('agent:stop-bg', () => { bgAgent.running = false; bgAgent.wasStopped = true; return { ok: true } })
+
+// One-shot (non-streaming) Claude call against the local API key. Used by
+// the renderer for skill generation when the Supabase pipeline is offline.
+// `content` is a Messages-API content array, so callers can mix text and
+// image blocks (e.g. video keyframes).
+ipcMain.handle('agent:complete', async (_, { system, content, model, max_tokens }) => {
+  const key = localAnthropicKey()
+  if (!key) return { error: 'need_key' }
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body:    JSON.stringify({
+        model:      model || 'claude-sonnet-4-5',
+        max_tokens: max_tokens || 4096,
+        system,
+        messages:   [{ role: 'user', content }],
+      }),
+    })
+    if (!res.ok) return { error: `Anthropic API ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}` }
+    const j = await res.json()
+    return { text: (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('') }
+  } catch (e) {
+    return { error: e.message }
+  }
+})
 ipcMain.handle('agent:get-state', () => ({ running: bgAgent.running, task: bgAgent.task, startedAt: bgAgent.startedAt }))
 
 // ---- Macro mode (local-only record + replay) ----
