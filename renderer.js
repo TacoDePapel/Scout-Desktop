@@ -160,7 +160,7 @@ One or two sentences on the outcome.
 ## Done when
 The observable condition that proves the task succeeded.
 
-Base every step on the evidence provided (screenshots, narration, window titles). If the evidence is thin, produce fewer, broader steps rather than inventing details.`
+Base every step on the evidence provided (screenshots, narration, window titles). Describe the ACTUAL apps, sites, buttons and text visible in the screenshots — read them carefully, they are the recording. Never write meta-steps like "perform the actions demonstrated in the recording"; if you genuinely cannot tell what the user did, write your best reading of the screenshots and mark uncertain steps with "(verify)".`
 
 async function processRecordingLocal(rec, extraContext) {
   view = { kind: 'processing', recording: rec, stage: 'drafting', error: null }
@@ -169,7 +169,14 @@ async function processRecordingLocal(rec, extraContext) {
     const speechText = (rec._speechTranscript || '').trim()
     const auto = buildScreenContext(rec)
     const mergedExtra = [auto, (extraContext || '').trim()].filter(Boolean).join('\n\n')
-    const frames = await extractKeyframes(rec._blob)
+    // Frames captured live during recording are the reliable source; blob
+    // extraction is the fallback for recordings made before live capture
+    // existed (and returns [] for audio-only blobs).
+    const frames = (rec._frames && rec._frames.length) ? rec._frames : await extractKeyframes(rec._blob)
+
+    if (!frames.length && !speechText) {
+      throw new Error("The recording had no usable evidence — no screen frames and no narration. Record again (talking through what you're doing helps), or use Macro mode for click/keystroke capture.")
+    }
 
     const content = []
     for (const f of frames) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f } })
@@ -932,6 +939,32 @@ async function startRecording() {
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
   recorder.start(5000)
 
+  // Live keyframe capture — grab JPEG frames straight off the screen stream
+  // while recording. Post-hoc extraction from the recorded blob is unreliable:
+  // MediaRecorder webm is often unseekable, and when a mic is present the
+  // uploaded blob is audio-only. These frames are the visual evidence the
+  // local skill generator feeds to Claude.
+  const liveFrames = []
+  const frameVideo = document.createElement('video')
+  frameVideo.muted = true
+  frameVideo.srcObject = screenStream
+  void frameVideo.play().catch(() => {})
+  const frameCanvas = document.createElement('canvas')
+  const grabFrame = () => {
+    try {
+      if (!frameVideo.videoWidth) return
+      const scale = Math.min(1, 1280 / frameVideo.videoWidth)
+      frameCanvas.width  = Math.round(frameVideo.videoWidth * scale)
+      frameCanvas.height = Math.round(frameVideo.videoHeight * scale)
+      frameCanvas.getContext('2d').drawImage(frameVideo, 0, 0, frameCanvas.width, frameCanvas.height)
+      liveFrames.push(frameCanvas.toDataURL('image/jpeg', 0.7).split(',')[1])
+      // Cap the set: drop from the middle so first and latest survive.
+      if (liveFrames.length > 8) liveFrames.splice(2, 2)
+    } catch {}
+  }
+  const frameTimer = setInterval(grabFrame, 4000)
+  setTimeout(grabFrame, 700)   // early frame so short recordings get at least one
+
   view = {
     kind: 'recording',
     state: {
@@ -950,6 +983,7 @@ async function startRecording() {
       _recorder: recorder, _chunks: chunks,
       _audioRecorder: audioRecorder, _audioChunks: audioChunks,
       _screenStream: screenStream, _micStream: micStream,
+      _frames: liveFrames, _frameTimer: frameTimer, _frameVideo: frameVideo, _grabFrame: grabFrame,
       window_at_start: null,
       window_at_end:   null,
     },
@@ -1001,12 +1035,17 @@ async function startRecording() {
 
 async function doStopRecording() {
   if (view.kind !== 'recording') return
-  const { _recorder, _chunks, _audioRecorder, _audioChunks, _screenStream, _micStream, recording_id, started_at, paused_ms, mode, window_at_start } = view.state
+  const { _recorder, _chunks, _audioRecorder, _audioChunks, _screenStream, _micStream, _frames, _frameTimer, _frameVideo, _grabFrame, recording_id, started_at, paused_ms, mode, window_at_start } = view.state
 
   // Capture the focused window NOW (before we steal focus by tearing down
   // streams) so the skill prompt can note where the user finished.
   let window_at_end = null
   try { window_at_end = await window.electronAPI.getActiveWindowInfo?.() } catch {}
+
+  // One last frame of the final screen state, then stop the live capture.
+  try { _grabFrame?.() } catch {}
+  if (_frameTimer) clearInterval(_frameTimer)
+  if (_frameVideo) _frameVideo.srcObject = null
 
   stopRecordingLoops()
   void window.electronAPI.overlayHide?.()
@@ -1041,6 +1080,7 @@ async function doStopRecording() {
     // Prefer the audio-only blob for upload; falls back to combined webm.
     _blob:       audioBlob || new Blob(_chunks, { type: 'video/webm' }),
     _isAudioOnly: !!audioBlob,
+    _frames:     _frames || [],
     _speechTranscript: view.state.live_transcript || '',
     _window_at_start: window_at_start || null,
     _window_at_end:   window_at_end   || null,
