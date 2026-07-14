@@ -67,18 +67,27 @@ async function doSignOut() {
   render()
 }
 
+// Once a fetch fails (e.g. the Supabase project is paused/offline), stop
+// trying for the rest of the session — otherwise every Library visit burns
+// ~10s of DNS retries before falling back.
+let supabaseUnreachable = false
+
 async function loadLibraryData() {
-  if (!supabase || !currentUser) return MOCK_RECORDINGS
+  if (!supabase || !currentUser || supabaseUnreachable) return MOCK_RECORDINGS
   try {
-    const { data, error } = await supabase
-      .from('recordings')
-      .select('*, skills(*)')
-      .order('started_at', { ascending: false })
-      .limit(50)
+    const { data, error } = await Promise.race([
+      supabase
+        .from('recordings')
+        .select('*, skills(*)')
+        .order('started_at', { ascending: false })
+        .limit(50),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('backend timeout')), 2500)),
+    ])
     if (error) throw error
     return data?.length ? data : []
   } catch (e) {
     console.warn('Library fetch failed, using mock data:', e)
+    supabaseUnreachable = true
     return MOCK_RECORDINGS
   }
 }
@@ -2887,8 +2896,13 @@ function macrosTab() {
   const offSched = (data) => { if (view.kind === 'idle' && view.tab === 'macros') reloadSchedules() }
   window.electronAPI.onMacroSchedules?.(offSched)
 
-  const tick = setInterval(() => {
+  const tick = setInterval(async () => {
     if (view.kind !== 'idle' || view.tab !== 'macros') { clearInterval(tick); clearInterval(schedTick); return }
+    // While recording, pull fresh state so the event counter ticks live —
+    // main only pushes macro:state on start/stop, not per captured event.
+    if (macroState.recorder?.recording) {
+      try { macroState = await window.electronAPI.macroGetState() } catch {}
+    }
     paintHeader()
   }, 700)
   // Refresh "in N minutes" labels less often — minute resolution is plenty.
