@@ -1811,7 +1811,7 @@ ${skill.body_md.trim()}
     try {
       const { error } = await window.electronAPI.startAgentBg({ task, token: SUPABASE_ANON_KEY })
       if (error) { alert('Agent failed to start: ' + error); btn.disabled = false; btn.textContent = '✦ Run automatically'; return }
-      bgAgentSteps = []; bgAgentTask = (skill.title || 'Run skill') + ' — auto-execution'; bgAgentRunning = true
+      bgAgentSteps = []; bgAgentTask = (skill.title || 'Run skill') + ' — auto-execution'; bgAgentRunning = true; bgAgentIsReplay = false
       view = { kind: 'agent-bg-running' }
       render()
     } catch (e) {
@@ -2384,6 +2384,9 @@ async function generateSkillFromAgentSession() {
 let bgAgentSteps   = []
 let bgAgentRunning = false
 let bgAgentTask    = ''
+// True while the current background run is a macro replay — replays reproduce
+// an existing recording, so they must NOT trigger post-run skill capture.
+let bgAgentIsReplay = false
 let mcpStatus      = {}
 let monitorActive  = false
 let latestFrame    = null
@@ -2419,7 +2422,7 @@ function initMainProcessListeners() {
         const statusEl = document.getElementById('agent-bg-status')
         if (statusEl) statusEl.innerHTML = `<div style="width:6px;height:6px;border-radius:50%;background:rgba(255,232,199,0.28);flex-shrink:0;"></div><span style="font-size:10px;color:rgba(255,232,199,0.45);">Completed in ${Math.round((data.elapsed||0)/1000)}s</span>`
       }
-      void generateSkillFromBgSession()
+      if (!bgAgentIsReplay) void generateSkillFromBgSession()
     }
   })
 
@@ -2943,7 +2946,7 @@ function macrosTab() {
       // inline key form instead of an error.
       if (r?.error === 'need_key') { keyPicker.style.display = 'flex'; keyPicker.querySelector('.api-key').focus(); return }
       if (r?.error) { alert('Could not start: ' + r.error); return }
-      bgAgentSteps = []; bgAgentTask = m.name + ' — background run'; bgAgentRunning = true
+      bgAgentSteps = []; bgAgentTask = m.name + ' — background run'; bgAgentRunning = true; bgAgentIsReplay = true
       view = { kind: 'agent-bg-running' }
       render()
     }

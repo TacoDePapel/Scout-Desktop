@@ -757,10 +757,14 @@ async function callAgentEdge(token, body, attempt = 0) {
 // upgrades or wants Sonnet, set bgAgent.model before running.
 const DEFAULT_AGENT_MODEL = 'claude-haiku-4-5'
 
-async function runBgAgent(task, token) {
-  bgAgent = { running: true, task, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false, stopReason: null, elapsed: 0, model: DEFAULT_AGENT_MODEL }
+async function runBgAgent(task, token, label, model) {
+  // `task` may be a plain string or a Messages-API content array (e.g. macro
+  // replay: instructions + screenshots). `label` is the human-readable name
+  // for the tray/UI when task isn't a string.
+  const displayTask = typeof task === 'string' ? task : (label || 'Background task')
+  bgAgent = { running: true, task: displayTask, steps: [], messages: [{ role: 'user', content: task }], startedAt: Date.now(), wasStopped: false, stopReason: null, elapsed: 0, model: model || DEFAULT_AGENT_MODEL }
   updateTray()
-  send('agent:update', { type: 'start', task })
+  send('agent:update', { type: 'start', task: displayTask })
 
   const MAX_ITER = 50
   let iter = 0
@@ -1062,10 +1066,10 @@ function buildTrayMenu() {
           ? 'Stop Macro Playback'
           : 'Start Macro Recording',
       enabled: macro.isAvailable(),
-      click: () => {
-        if (recState.recording) macro.stopRecording()
+      click: async () => {
+        if (recState.recording) await macro.stopRecording()
         else if (plyState.playing) macro.stopPlay()
-        else macro.startRecording()
+        else macro.startRecording({ screenshotFn: macroScreenshot })
         pushMacroState()
       } },
     { label: agentBrowserVisible ? 'Hide Agent Browser' : 'Show Agent Browser',
@@ -1319,6 +1323,15 @@ ipcMain.handle('agent:get-state', () => ({ running: bgAgent.running, task: bgAge
 
 // ---- Macro mode (local-only record + replay) ----
 
+// Screen snapshot for the macro recorder — captured at start, each click and
+// stop, so "Run in background" can see what every click actually hit.
+async function macroScreenshot() {
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1024, height: 576 } })
+    return sources[0] ? sources[0].thumbnail.toJPEG(60).toString('base64') : null
+  } catch { return null }
+}
+
 function pushMacroState() {
   send('macro:state', {
     available: macro.isAvailable(),
@@ -1339,8 +1352,8 @@ ipcMain.handle('macro:list',            ()                 => macro.listMacros()
 ipcMain.handle('macro:get',             (_, { id })        => macro.getMacro(id))
 ipcMain.handle('macro:delete',          (_, { id })        => macro.deleteMacro(id))
 ipcMain.handle('macro:rename',          (_, { id, name })  => macro.renameMacro(id, name))
-ipcMain.handle('macro:start-recording', ()                 => { const r = macro.startRecording(); pushMacroState(); return r })
-ipcMain.handle('macro:stop-recording',  (_, { name } = {}) => { const r = macro.stopRecording(name); pushMacroState(); return r })
+ipcMain.handle('macro:start-recording', ()                       => { const r = macro.startRecording({ screenshotFn: macroScreenshot }); pushMacroState(); return r })
+ipcMain.handle('macro:stop-recording',  async (_, { name } = {}) => { const r = await macro.stopRecording(name); pushMacroState(); return r })
 ipcMain.handle('macro:play', async (_, { id, speed, hideWindow }) => {
   return playMacroWithChrome(id, { speed, hideWindow })
 })
@@ -1359,24 +1372,48 @@ ipcMain.handle('macro:ai-run', async (_, { id, token }) => {
   const fmt = macro.formatMacroForAI(id)
   if (!fmt) return { error: `Macro ${id} not found` }
 
-  const task = `You are replaying a desktop workflow the user recorded. Recreate its OUTCOME in the BACKGROUND using your tools (bash, browser, gmail_send) — do NOT simulate mouse/keyboard input.
+  const instructions = `You are replaying a desktop workflow the user recorded. Your job is to do EXACTLY what they did — same actions, same order, same values — in the BACKGROUND using your tools (bash, browser, gmail_send). You cannot control the real mouse/keyboard; you reproduce each step through the equivalent tool action.
 
-The recording below is raw input: clicks are screen coordinates (you cannot see what was clicked), typed text is exact. Infer intent primarily from the typed text — URLs, search queries, filenames, message bodies. Keyboard shortcuts (Ctrl+L, Ctrl+C…) hint at browser/editor actions.
+You get two kinds of evidence, which together are complete:
+- Screenshots: the screen at recording start, at the moment of EACH click, and at the end. When the log says "Clicked at (x, y) — screenshot N", look at screenshot N at those coordinates to see exactly which button/link/field the user clicked.
+- The input log: every keystroke and click, in order. Typed text is character-exact.
 
-Hard rules:
-1. Every string the user typed is ground truth — pass those exact values to your tools. Never substitute placeholders.
-2. If the workflow sends email via Gmail, use the gmail_send tool with the exact recipient/subject/body — never click through Gmail's UI.
-3. If intent is genuinely ambiguous, take ONE desktop screenshot for context. If still ambiguous, emit a single message starting with "NEEDS:" listing what's missing and stop.
-4. Work fully in the background: hidden browser, no user interaction, no asking the user to click.
-5. When the outcome is achieved, stop. Final summary: 1-2 lines with the exact values used.
+Execution rules — LITERAL, not creative:
+1. Walk the log step by step, in order. Do not skip, reorder, merge, "optimize" or add steps. Each user action maps to one equivalent tool action.
+2. Every typed string, URL, recipient and filename is ground truth — use them character-for-character. Never substitute your own values or placeholders.
+3. Browser steps happen in the hidden browser: navigate to the same pages (read the URL from the screenshots or typed text), click the same elements (identify them in the click screenshot, then find them by selector/text), type the same text.
+4. Gmail sends go through gmail_send with the exact recipient/subject/body — never click through Gmail's UI.
+5. File/app operations go through bash with the same paths and names.
+6. The final screenshot shows how the screen looked when the user finished — that is what success looks like. Match it.
+7. If a step is genuinely unreadable from the evidence, emit one message starting with "NEEDS:" saying which step and what is missing, then stop. Never guess and never wander off (no searching the disk, no exploring).
+8. Fully background: hidden browser, zero user interaction.
+9. Final summary: 1-2 lines listing what was replayed with the exact values used.`
 
---- RECORDED WORKFLOW: ${fmt.name} (${Math.round((fmt.duration_ms || 0) / 1000)}s) ---
+  // Interleave screenshots (capped) with the log so Claude can cross-reference.
+  const shots = fmt.shots || []
+  const MAX_SHOTS = 9
+  let picked = shots.map((s, i) => ({ ...s, n: i + 1 }))
+  if (picked.length > MAX_SHOTS) {
+    const first = picked[0], last = picked[picked.length - 1]
+    const middle = picked.slice(1, -1)
+    const step = middle.length / (MAX_SHOTS - 2)
+    picked = [first, ...Array.from({ length: MAX_SHOTS - 2 }, (_, i) => middle[Math.floor(i * step)]), last]
+  }
+
+  const content = [{ type: 'text', text: instructions }]
+  for (const s of picked) {
+    content.push({ type: 'text', text: `Screenshot ${s.n} — screen at ${Math.floor(s.t / 1000)}s:` })
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: s.jpg } })
+  }
+  content.push({ type: 'text', text: `--- RECORDED INPUT LOG: ${fmt.name} (${Math.round((fmt.duration_ms || 0) / 1000)}s) ---
 
 ${fmt.text}
 
---- END RECORDING ---`
+--- END LOG --- Replay it now, step by step.` })
 
-  void runBgAgent(task, token)
+  // Sonnet for replays: reading click targets out of screenshots and mapping
+  // them to selectors is exactly where the smaller model gets sloppy.
+  void runBgAgent(content, token, `Replay: ${fmt.name}`, 'claude-sonnet-4-5')
   return { ok: true, task_preview: fmt.text.slice(0, 400) }
 })
 
@@ -1666,9 +1703,9 @@ app.whenReady().then(async () => {
       })
       return
     }
-    if (macro.recorderState().recording)   macro.stopRecording()
+    if (macro.recorderState().recording)   { void macro.stopRecording().then(() => pushMacroState()) }
     else if (macro.playerState().playing)  macro.stopPlay()
-    else                                   macro.startRecording()
+    else                                   macro.startRecording({ screenshotFn: macroScreenshot })
     pushMacroState()
   })
 
