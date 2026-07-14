@@ -2811,6 +2811,28 @@ function macrosTab() {
   `
   d.appendChild(headerCard)
 
+  // "What works best" note — sets honest expectations about what background
+  // replay can and can't reproduce. Collapsed by default so it never nags.
+  const guide = document.createElement('details')
+  guide.className = 'glass'
+  guide.style.cssText = 'padding:12px 16px;'
+  guide.innerHTML = `
+    <summary style="cursor:pointer;font-size:11px;color:#E4AF7A;list-style:none;display:flex;align-items:center;gap:6px;">
+      <span style="font-size:12px;">✦</span> What replays best in the background
+      <span style="margin-left:auto;font-size:9px;color:rgba(255,232,199,0.35);">tap to expand</span>
+    </summary>
+    <div style="margin-top:10px;font-size:11px;line-height:1.65;color:rgba(255,232,199,0.60);">
+      Scout recreates your task with its own tools (a hidden browser, the shell, email), so it runs while you keep working. That shapes what it can do:
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px;">
+        <div><span style="color:#4ADE80;">✓ Works great</span> — websites &amp; web forms, sending email, files &amp; commands, anything driven by text you type (recipients, URLs, messages).</div>
+        <div><span style="color:#F0B072;">~ Best effort</span> — unusual or heavily-scripted web apps where buttons are hard to identify.</div>
+        <div><span style="color:#F87171;">✗ Not in background</span> — native desktop apps (Photoshop, Excel), drag/draw/precise-mouse work, and steps needing a human (CAPTCHA, 2FA). For these, use <b>▶ Replay</b>, which reproduces your exact input but takes over the screen.</div>
+      </div>
+      <div style="margin-top:8px;color:rgba(255,232,199,0.42);">First run on a site may ask you to sign in once — the background browser has its own session. After that it stays signed in.</div>
+    </div>
+  `
+  d.appendChild(guide)
+
   // If native libs missing, show install hint and bail out (no list shown).
   if (macroState.available === false) {
     const warn = document.createElement('div')

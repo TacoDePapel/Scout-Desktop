@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened Runtime entitlements for a Developer ID (notarized DMG) build.
+       This is NOT a Mac App Store build: Scout is deliberately un-sandboxed so
+       it can capture global input, drive other apps, and run shell commands —
+       none of which the App Store sandbox permits. -->
+
+  <!-- Electron / V8 need JIT and writable+executable memory. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- uiohook-napi and nut-js ship prebuilt native binaries; library
+       validation must be relaxed so the signed app can load them. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- The background agent spawns child processes (bash, etc.). -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+  <!-- Microphone: Scout records narration for skill guides. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>
