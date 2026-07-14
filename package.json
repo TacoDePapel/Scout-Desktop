@@ -5,7 +5,7 @@
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
   "scripts": {
-    "start": "electron .",
+    "start": "electron . --no-sandbox",
     "gen-icon": "node scripts/gen-icon.js",
     "postinstall": "electron-builder install-app-deps || echo \"postinstall: native rebuild skipped (this is OK if you see no errors at runtime - uiohook-napi and libnut ship N-API prebuilts that work in Electron without rebuild)\"",
     "dist": "npm run gen-icon && electron-builder",

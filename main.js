@@ -704,12 +704,29 @@ function compactMessages(messages, keepLastImageRounds = 2) {
   })
 }
 
+// A locally configured Anthropic key takes priority over the Supabase edge
+// proxy: it works even when the Supabase project is paused/deleted, and it
+// skips one network hop. Set via env or the in-app key form (settings).
+function localAnthropicKey() {
+  return process.env.ANTHROPIC_API_KEY || readSettings().anthropic_api_key || null
+}
+
 async function callAgentEdge(token, body, attempt = 0) {
+  const apiKey = localAnthropicKey()
   const ctrl = new AbortController()
   // Per-request timeout for headers/initial response — stream itself can run longer.
   const headerTimer = setTimeout(() => ctrl.abort(), 60_000)
   try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/agent-run`, {
+    // Direct Anthropic call streams the same SSE event shapes the edge
+    // function forwards, so the parser downstream doesn't care which path fed it.
+    const res = apiKey
+      ? await fetch('https://api.anthropic.com/v1/messages', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+          body:    JSON.stringify({ model: body.model, max_tokens: 16384, stream: true, system: body.system, messages: body.messages, tools: body.tools }),
+          signal:  ctrl.signal,
+        })
+      : await fetch(`${SUPABASE_URL}/functions/v1/agent-run`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body:    JSON.stringify(body),
@@ -718,7 +735,7 @@ async function callAgentEdge(token, body, attempt = 0) {
     clearTimeout(headerTimer)
     if (!res.ok) {
       const t = await res.text().catch(() => String(res.status))
-      const err = new Error(`Edge function ${res.status}: ${t.slice(0, 500)}`)
+      const err = new Error(`${apiKey ? 'Anthropic API' : 'Edge function'} ${res.status}: ${t.slice(0, 500)}`)
       err.status = res.status
       throw err
     }
@@ -1277,6 +1294,40 @@ ipcMain.handle('macro:play', async (_, { id, speed, hideWindow }) => {
   return playMacroWithChrome(id, { speed, hideWindow })
 })
 ipcMain.handle('macro:stop-play', () => { const r = macro.stopPlay(); pushMacroState(); return r })
+
+// AI background run — instead of replaying raw input (which takes over the
+// mouse/keyboard), hand a readable log of the recorded workflow to the
+// background agent. It recreates the outcome with bash/browser tools while
+// the user keeps working. Streams into the same agent:update UI.
+ipcMain.handle('macro:ai-run', async (_, { id, token }) => {
+  if (bgAgent.running) return { error: 'Agent already running — stop it first' }
+  // Macro AI runs go straight to the Anthropic API — the hosted Supabase
+  // proxy is not required (and may not exist). Renderer shows the one-time
+  // key form when it sees this sentinel.
+  if (!localAnthropicKey()) return { error: 'need_key' }
+  const fmt = macro.formatMacroForAI(id)
+  if (!fmt) return { error: `Macro ${id} not found` }
+
+  const task = `You are replaying a desktop workflow the user recorded. Recreate its OUTCOME in the BACKGROUND using your tools (bash, browser, gmail_send) — do NOT simulate mouse/keyboard input.
+
+The recording below is raw input: clicks are screen coordinates (you cannot see what was clicked), typed text is exact. Infer intent primarily from the typed text — URLs, search queries, filenames, message bodies. Keyboard shortcuts (Ctrl+L, Ctrl+C…) hint at browser/editor actions.
+
+Hard rules:
+1. Every string the user typed is ground truth — pass those exact values to your tools. Never substitute placeholders.
+2. If the workflow sends email via Gmail, use the gmail_send tool with the exact recipient/subject/body — never click through Gmail's UI.
+3. If intent is genuinely ambiguous, take ONE desktop screenshot for context. If still ambiguous, emit a single message starting with "NEEDS:" listing what's missing and stop.
+4. Work fully in the background: hidden browser, no user interaction, no asking the user to click.
+5. When the outcome is achieved, stop. Final summary: 1-2 lines with the exact values used.
+
+--- RECORDED WORKFLOW: ${fmt.name} (${Math.round((fmt.duration_ms || 0) / 1000)}s) ---
+
+${fmt.text}
+
+--- END RECORDING ---`
+
+  void runBgAgent(task, token)
+  return { ok: true, task_preview: fmt.text.slice(0, 400) }
+})
 
 // Internal: wraps macro.play() with the UX chrome — minimizes Scout, shows a
 // full-screen click-through "don't touch" warning overlay during replay, then

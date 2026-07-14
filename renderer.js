@@ -2706,7 +2706,8 @@ function macrosTab() {
         </div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <button class="btn btn-primary play" style="flex:1;min-width:130px;font-size:11px;padding:6px 10px;">▶ Run with AI</button>
+        <button class="btn btn-primary ai-run" style="flex:1;min-width:150px;font-size:11px;padding:6px 10px;">✦ Run in background</button>
+        <button class="btn play" style="font-size:11px;padding:6px 10px;">▶ Replay</button>
         <select class="speed" title="Replay speed" style="font-size:11px;padding:6px 8px;background:rgba(0,0,0,0.30);color:#FFE8C7;border:1px solid rgba(228,175,122,0.30);border-radius:6px;cursor:pointer;">
           <option value="1">1×</option>
           <option value="2">2×</option>
@@ -2722,10 +2723,44 @@ function macrosTab() {
         <button class="btn btn-primary save-sched" style="font-size:11px;padding:5px 10px;">Save</button>
         <button class="btn cancel-sched"           style="font-size:11px;padding:5px 10px;">Cancel</button>
       </div>
+      <div class="key-picker" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:11px;color:rgba(255,232,199,0.55);flex-basis:100%;">One-time setup: paste your Anthropic API key (console.anthropic.com → API keys). Stored only on this machine.</span>
+        <input type="password" class="api-key" placeholder="sk-ant-…" style="flex:1;min-width:170px;font-size:11px;padding:5px 8px;background:rgba(0,0,0,0.30);color:#FFE8C7;border:1px solid rgba(228,175,122,0.30);border-radius:6px;" />
+        <button class="btn btn-primary save-key" style="font-size:11px;padding:5px 10px;">Save & run</button>
+      </div>
     `
     const speedSel = row.querySelector('.speed')
     const picker   = row.querySelector('.sched-picker')
 
+    // Primary: hand the recording to the background agent. It recreates the
+    // outcome with its own tools — screen and input stay free for the user.
+    const startAiRun = async () => {
+      const btn = row.querySelector('.ai-run')
+      btn.disabled = true; btn.textContent = 'Starting…'
+      const r = await window.electronAPI.macroAiRun(m.id, SUPABASE_ANON_KEY)
+      btn.disabled = false; btn.textContent = '✦ Run in background'
+      // First run on a machine with no Anthropic key: show the one-time
+      // inline key form instead of an error.
+      if (r?.error === 'need_key') { keyPicker.style.display = 'flex'; keyPicker.querySelector('.api-key').focus(); return }
+      if (r?.error) { alert('Could not start: ' + r.error); return }
+      bgAgentSteps = []; bgAgentTask = m.name + ' — background run'; bgAgentRunning = true
+      view = { kind: 'agent-bg-running' }
+      render()
+    }
+    const keyPicker = row.querySelector('.key-picker')
+    row.querySelector('.ai-run').onclick = startAiRun
+    keyPicker.querySelector('.save-key').onclick = async () => {
+      const v = keyPicker.querySelector('.api-key').value.trim()
+      if (!v) return
+      await window.electronAPI.setSettings('anthropic_api_key', v)
+      keyPicker.style.display = 'none'
+      await startAiRun()
+    }
+    keyPicker.querySelector('.api-key').onkeydown = (e) => {
+      if (e.key === 'Enter') keyPicker.querySelector('.save-key').click()
+    }
+
+    // Secondary: exact input replay (takes over mouse/keyboard until done).
     row.querySelector('.play').onclick = async () => {
       const btn = row.querySelector('.play')
       btn.disabled = true
@@ -2733,12 +2768,12 @@ function macrosTab() {
       // before synthesized input starts flying. Scout's window also minimizes
       // (main.js macro:play handler) so the cursor isn't fighting our UI.
       for (let n = 3; n >= 1; n--) {
-        btn.textContent = `Running in ${n}…`
+        btn.textContent = `Replay in ${n}…`
         await new Promise(r => setTimeout(r, 1000))
       }
-      btn.textContent = '● Running…'
+      btn.textContent = '● Replaying…'
       const r = await window.electronAPI.macroPlay(m.id, { speed: Number(speedSel.value) || 1 })
-      btn.disabled = false; btn.textContent = '▶ Run with AI'
+      btn.disabled = false; btn.textContent = '▶ Replay'
       if (r?.error) alert('Playback failed: ' + r.error)
     }
 
@@ -2765,12 +2800,26 @@ function macrosTab() {
       await reloadSchedules()
     }
 
-    row.querySelector('.rename').onclick = async () => {
-      const next = prompt('Rename macro:', m.name)
-      if (next != null && next.trim()) {
-        await window.electronAPI.macroRename(m.id, next.trim())
+    // window.prompt doesn't exist in Electron — edit the name in place instead.
+    row.querySelector('.rename').onclick = () => {
+      const nameEl = row.querySelector('.macro-name')
+      const input = document.createElement('input')
+      input.value = m.name
+      input.style.cssText = 'width:100%;font-size:13px;padding:3px 6px;background:rgba(0,0,0,0.30);color:#FFE8C7;border:1px solid rgba(228,175,122,0.50);border-radius:6px;'
+      nameEl.replaceWith(input)
+      input.focus(); input.select()
+      let done = false
+      const commit = async (save) => {
+        if (done) return; done = true
+        const next = input.value.trim()
+        if (save && next && next !== m.name) await window.electronAPI.macroRename(m.id, next)
         await reloadList()
       }
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') commit(true)
+        else if (e.key === 'Escape') commit(false)
+      }
+      input.onblur = () => commit(true)
     }
     row.querySelector('.del').onclick = async () => {
       if (!confirm(`Delete "${m.name}"? This can't be undone.`)) return

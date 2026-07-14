@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   macroStartRecording: ()                  => ipcRenderer.invoke('macro:start-recording'),
   macroStopRecording:  (name)              => ipcRenderer.invoke('macro:stop-recording', { name }),
   macroPlay:           (id, opts)          => ipcRenderer.invoke('macro:play', { id, ...(opts || {}) }),
+  macroAiRun:          (id, token)         => ipcRenderer.invoke('macro:ai-run', { id, token }),
   macroStopPlay:       ()                  => ipcRenderer.invoke('macro:stop-play'),
   onMacroState:        (cb)                => ipcRenderer.on('macro:state', (_e, data) => cb(data)),
 
