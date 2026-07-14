@@ -144,28 +144,37 @@ async function extractKeyframes(blob, count = 4) {
   }
 }
 
-const LOCAL_SKILL_SYSTEM = `You turn a screen recording of a user performing a task into a reusable "skill" — a step-by-step guide another person or an AI agent can follow to repeat the task.
+const LOCAL_SKILL_SYSTEM = `You turn a screen recording into an EXACT-REPLAY skill: an agent will follow it to reproduce the SAME task with the SAME values the user just used. This is replay, not a reusable template.
 
 Output ONLY the skill markdown, exactly in this format (no preamble, no code fence around the whole thing):
 
 ---
 name: kebab-case-slug
 version: 1
-description: One sentence describing what this skill accomplishes.
+description: One sentence describing what this skill accomplishes, including the actual key value (e.g. recipient, target site).
 ---
 
 # Title In Plain Words
 
-## Goal
-One or two sentences on the outcome.
+## Values
+List every concrete value the user actually entered, read verbatim from the screenshots. E.g.:
+- Recipient: someone@example.com
+- Subject: Q3 invoice
+- Body: Hi, please find attached…
+If a value is truly unreadable in every screenshot, write "(could not read)" — never invent one.
 
 ## Steps
-1. Numbered, concrete steps. Name the exact apps, buttons, URLs and values visible in the evidence. Use {placeholders} for values that will change run to run.
+1. Numbered, concrete steps naming the exact apps, buttons and URLs. When a step enters a value, write the ACTUAL value inline (from the Values list) — never a {placeholder}.
 
 ## Done when
 The observable condition that proves the task succeeded.
 
-Base every step on the evidence provided (screenshots, narration, window titles). Describe the ACTUAL apps, sites, buttons and text visible in the screenshots — read them carefully, they are the recording. Never write meta-steps like "perform the actions demonstrated in the recording"; if you genuinely cannot tell what the user did, write your best reading of the screenshots and mark uncertain steps with "(verify)".`
+Critical rules:
+- Read the screenshots carefully — they ARE the recording. The recipient, subject, body, URLs, filenames and field contents the user typed are visible in them; transcribe them EXACTLY, character for character.
+- NEVER use {placeholders} or generic stand-ins like "recipient@example.com". The user wants THIS exact task replayed. Placeholders defeat the entire purpose.
+- The last screenshots usually show the fully filled-in form right before submit — the richest source of values. Prefer them.
+- Never write meta-steps like "perform the actions from the recording." If some detail is genuinely illegible, capture everything you CAN read and mark only the missing piece "(could not read)".
+- The UI may be in any language (Spanish, etc.) — read the values regardless of UI language.`
 
 async function processRecordingLocal(rec, extraContext) {
   view = { kind: 'processing', recording: rec, stage: 'drafting', error: null }
@@ -973,16 +982,21 @@ async function startRecording() {
   const grabFrame = () => {
     try {
       if (!frameVideo.videoWidth) return
-      const scale = Math.min(1, 1280 / frameVideo.videoWidth)
+      // Keep near-full resolution + high JPEG quality: the whole point is that
+      // Claude can READ the exact recipient/subject/body/URL text the user
+      // typed. Downscaling or heavy compression makes small UI text illegible.
+      const scale = Math.min(1, 1600 / frameVideo.videoWidth)
       frameCanvas.width  = Math.round(frameVideo.videoWidth * scale)
       frameCanvas.height = Math.round(frameVideo.videoHeight * scale)
       frameCanvas.getContext('2d').drawImage(frameVideo, 0, 0, frameCanvas.width, frameCanvas.height)
-      liveFrames.push(frameCanvas.toDataURL('image/jpeg', 0.7).split(',')[1])
-      // Cap the set: drop from the middle so first and latest survive.
-      if (liveFrames.length > 8) liveFrames.splice(2, 2)
+      liveFrames.push(frameCanvas.toDataURL('image/jpeg', 0.85).split(',')[1])
+      // Cap the set: drop from the middle so the first frames (initial state)
+      // and the latest frames (completed form right before submit — the most
+      // value-rich evidence) always survive.
+      if (liveFrames.length > 12) liveFrames.splice(3, 2)
     } catch {}
   }
-  const frameTimer = setInterval(grabFrame, 4000)
+  const frameTimer = setInterval(grabFrame, 2500)
   setTimeout(grabFrame, 700)   // early frame so short recordings get at least one
 
   view = {
