@@ -73,7 +73,10 @@ async function doSignOut() {
 let supabaseUnreachable = false
 
 async function loadLibraryData() {
-  if (!supabase || !currentUser || supabaseUnreachable) return MOCK_RECORDINGS
+  // Locally saved recordings come first — they're the user's real work.
+  // Demo/mock data only shows when there is nothing real to show.
+  const local = await window.electronAPI.libraryListLocal?.().catch(() => []) || []
+  if (!supabase || !currentUser || supabaseUnreachable) return local.length ? local : MOCK_RECORDINGS
   try {
     const { data, error } = await Promise.race([
       supabase
@@ -84,11 +87,13 @@ async function loadLibraryData() {
       new Promise((_, rej) => setTimeout(() => rej(new Error('backend timeout')), 2500)),
     ])
     if (error) throw error
-    return data?.length ? data : []
+    const remote = data || []
+    const merged = [...local.filter(l => !remote.some(r => r.id === l.id)), ...remote]
+    return merged.length ? merged : []
   } catch (e) {
-    console.warn('Library fetch failed, using mock data:', e)
+    console.warn('Library fetch failed, using local/mock data:', e)
     supabaseUnreachable = true
-    return MOCK_RECORDINGS
+    return local.length ? local : MOCK_RECORDINGS
   }
 }
 
@@ -205,6 +210,21 @@ Write the skill.` })
       body_md,
       created_at: new Date().toISOString(),
     }
+    // Persist to the local library (metadata + skill only, no blobs) so the
+    // recording survives restarts and shows up in the Library tab.
+    void window.electronAPI.librarySaveLocal?.({
+      id: rec.id,
+      title,
+      status: 'ready',
+      started_at: rec.started_at,
+      ended_at: new Date().toISOString(),
+      duration_ms: rec.duration_ms,
+      mode: rec.mode,
+      transcript: { segments: speechText ? [{ start_ms: 0, end_ms: rec.duration_ms || 0, text: speechText }] : [] },
+      skills: [skill],
+      local: true,
+    })
+
     view = { kind: 'skill', recording: { ...rec, title, status: 'ready', skills: [skill] }, skill, allSkills: [skill] }
   } catch (err) {
     console.error('Local processing failed:', err)
@@ -2436,6 +2456,9 @@ function initMainProcessListeners() {
 
 async function generateSkillFromBgSession() {
   if (!bgAgentSteps.length || !supabase || !currentUser) return
+  // Backend offline: leave the user on the completed-run view (it shows the
+  // full step log) instead of failing into a Library that can't have it.
+  if (supabaseUnreachable) return
   const transcript = bgAgentSteps
     .filter(s => s.type === 'text')
     .map(s => s.text)
@@ -2485,7 +2508,12 @@ async function generateSkillFromBgSession() {
     const skillObj = rData?.skills?.[0] ?? finalSkill
     view = { kind: 'skill', recording: rData ?? { id: recId, title: bgAgentTask, mode: 'skill' }, skill: skillObj, allSkills: rData?.skills ?? [skillObj] }
     render()
-  } catch (e) { console.error('Bg agent skill gen failed:', e); view = { kind: 'idle', tab: 'library' }; render() }
+  } catch (e) {
+    console.error('Bg agent skill gen failed:', e)
+    if (/failed to fetch|network|fetch failed/i.test(e?.message || '')) supabaseUnreachable = true
+    // Don't yank the user off the run view they're reading — the skill save
+    // is a bonus, not the outcome.
+  }
 }
 
 // ---- Starter tasks ----

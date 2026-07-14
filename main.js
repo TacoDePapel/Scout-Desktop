@@ -1265,6 +1265,31 @@ ipcMain.handle('agent:start-bg', async (_, { task, token }) => {
 })
 ipcMain.handle('agent:stop-bg', () => { bgAgent.running = false; bgAgent.wasStopped = true; return { ok: true } })
 
+// ---- Local library — recordings + skills persisted on disk so the Library
+// works without the hosted backend. Metadata and skill markdown only (no
+// video blobs); newest first.
+function localLibraryPath() { return path.join(app.getPath('userData'), 'local-library.json') }
+function readLocalLibrary() {
+  try { return JSON.parse(fs.readFileSync(localLibraryPath(), 'utf8')) || [] } catch { return [] }
+}
+ipcMain.handle('library:save-local', (_, rec) => {
+  try {
+    if (!rec || !rec.id) return { error: 'Missing recording id' }
+    const all = readLocalLibrary()
+    const i = all.findIndex(r => r.id === rec.id)
+    if (i >= 0) all[i] = rec; else all.unshift(rec)
+    fs.writeFileSync(localLibraryPath(), JSON.stringify(all, null, 2))
+    return { ok: true }
+  } catch (e) { return { error: e.message } }
+})
+ipcMain.handle('library:list-local', () => readLocalLibrary())
+ipcMain.handle('library:delete-local', (_, { id }) => {
+  try {
+    fs.writeFileSync(localLibraryPath(), JSON.stringify(readLocalLibrary().filter(r => r.id !== id), null, 2))
+    return { ok: true }
+  } catch (e) { return { error: e.message } }
+})
+
 // One-shot (non-streaming) Claude call against the local API key. Used by
 // the renderer for skill generation when the Supabase pipeline is offline.
 // `content` is a Messages-API content array, so callers can mix text and

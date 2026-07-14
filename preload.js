@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Background agent (runs in main process — survives minimize)
   startAgentBg:  (opts) => ipcRenderer.invoke('agent:start-bg', opts),
   agentComplete: (opts) => ipcRenderer.invoke('agent:complete', opts),
+
+  // Local library (offline persistence of recordings + skills)
+  librarySaveLocal:   (rec) => ipcRenderer.invoke('library:save-local', rec),
+  libraryListLocal:   ()    => ipcRenderer.invoke('library:list-local'),
+  libraryDeleteLocal: (id)  => ipcRenderer.invoke('library:delete-local', { id }),
   stopAgentBg:   ()     => ipcRenderer.invoke('agent:stop-bg'),
   getAgentState: ()     => ipcRenderer.invoke('agent:get-state'),
   onAgentUpdate: (cb)   => ipcRenderer.on('agent:update', (_e, data) => cb(data)),
