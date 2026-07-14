@@ -1,7 +1,64 @@
 # Scout Desktop
 
-> **One-click downloads → https://tacodepapel.github.io/Scout-Desktop**
-> The landing page auto-detects Mac (Apple Silicon / Intel), Windows, or Linux and serves the right installer. Share this URL — no GitHub navigation needed.
+## Install on any computer (Windows · macOS · Linux)
+
+Scout runs from source with three commands. This works identically on every OS —
+`npm install` automatically fetches the right native binaries for that machine.
+
+### 1. Install the prerequisites (one time)
+
+- **Node.js 18 or newer** — https://nodejs.org (the "LTS" download). This includes `npm`.
+- **Git** — https://git-scm.com/downloads
+
+Verify they're installed by opening a terminal (Terminal on Mac, PowerShell on
+Windows) and running:
+
+```bash
+node --version    # should print v18.x or higher
+git --version
+```
+
+### 2. Get Scout and start it
+
+```bash
+git clone https://github.com/TacoDePapel/Scout-Desktop.git
+cd Scout-Desktop
+npm install
+npm start
+```
+
+`npm install` takes a minute (it downloads Electron and the input libraries).
+`npm start` opens the Scout window. To launch it again later, just `cd` back into
+the `Scout-Desktop` folder and run `npm start`.
+
+### 3. First run
+
+- **Add your Anthropic API key once.** The first time you use **✦ Run in
+  background** (Macros tab) or **✦ Run automatically** (a skill), Scout asks for
+  an Anthropic API key and remembers it on that machine. Get one at
+  https://console.anthropic.com/settings/keys. Record/replay of raw input works
+  without a key; the AI background features need it.
+- **Grant OS permissions when prompted** (needed for recording/replaying input):
+  - **macOS** — System Settings → Privacy & Security → **Accessibility** and
+    **Screen Recording**: enable Scout (or your terminal, when running from source).
+  - **Linux** — input capture works best in an **X11 / "Ubuntu on Xorg"** login
+    session; on native Wayland some apps capture fewer events. `npm start` already
+    passes `--no-sandbox` for you.
+  - **Windows** — no extra permissions; it just runs.
+
+### Updating to the latest version
+
+```bash
+cd Scout-Desktop
+git pull
+npm install
+npm start
+```
+
+> Prefer a double-click installer instead of source? Build one with
+> `npm run dist:win`, `npm run dist:mac`, or `npm run dist:linux` **on that
+> operating system** (installers can only be built on their own OS). For signed
+> macOS distribution see [PUBLISHING-MAC.md](PUBLISHING-MAC.md).
 
 ---
 
