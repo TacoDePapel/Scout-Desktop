@@ -16,6 +16,24 @@ app.disableHardwareAcceleration()
 // Single-instance guard
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0) }
 
+// ---- Proprietary hardening ----
+// Machine-binding license gate + anti-debug preflight. In dev these no-op,
+// so `npm start` stays usable. In packaged builds they run before any UI
+// bootstrap and app.quit() if the machine/binary fails to check out.
+const { verifyLicenseOrQuit }                    = require('./lib/license')
+const { verifyIntegrityOrQuit, installWindowGuards } = require('./lib/integrity')
+
+// Strip inspector env in packaged mode as defence-in-depth alongside the
+// integrity preflight and Electron Fuses. Fuses already refuse these at
+// the runtime level, but zeroing the env vars keeps them out of any child
+// processes we spawn (MCP servers, background agent, etc.).
+if (app.isPackaged) {
+  delete process.env.ELECTRON_RUN_AS_NODE
+  delete process.env.NODE_OPTIONS
+}
+
+installWindowGuards()
+
 let mainWindow     = null
 let selectedSourceId = null
 let agentBrowser   = null
@@ -1665,6 +1683,13 @@ app.whenReady().then(async () => {
   // Ensures notifications and taskbar entries show "Scout" on Windows
   // instead of a generic Electron label.
   if (IS_WIN) app.setAppUserModelId('agency.orage.scout')
+
+  // Hardening preflight — must run before any UI or child-process work.
+  // Both functions call app.quit() themselves on failure; we bail out here
+  // so the rest of bootstrap never runs on an unauthorised machine.
+  if (!verifyIntegrityOrQuit()) return
+  if (!verifyLicenseOrQuit())   return
+
   createWindow()
   setupTray()
 

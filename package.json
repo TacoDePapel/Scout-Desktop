@@ -12,7 +12,9 @@
     "dist:win": "npm run gen-icon && electron-builder --win",
     "dist:mac": "npm run gen-icon && electron-builder --mac",
     "dist:linux": "npm run gen-icon && electron-builder --linux",
-    "dist:all": "npm run gen-icon && electron-builder -mwl"
+    "dist:all": "npm run gen-icon && electron-builder -mwl",
+    "prepare:build": "node scripts/prepare-build.js",
+    "dist:secure": "npm run gen-icon && node scripts/build-secure.js"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.2",
@@ -27,6 +29,7 @@
       "buildResources": "build"
     },
     "npmRebuild": false,
+    "afterPack": "build/apply-fuses.js",
     "files": [
       "main.js",
       "preload.js",
@@ -104,7 +107,9 @@
     }
   },
   "devDependencies": {
+    "@electron/fuses": "^1.8.0",
     "electron": "^35.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "javascript-obfuscator": "^4.1.1"
   }
 }
