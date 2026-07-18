@@ -37,11 +37,11 @@ npm install
 
 echo "→ Building, signing and notarizing the universal DMG…"
 # CSC_IDENTITY_AUTO_DISCOVERY lets electron-builder find your Developer ID cert.
-# NOTARIZE=1 is read by the config note; electron-builder notarizes when the
-# APPLE_* env vars are present and identity is a real cert.
+# notarize=true makes electron-builder submit to Apple's notary service using
+# the APPLE_* env vars checked above.
 export CSC_IDENTITY_AUTO_DISCOVERY=true
 npm run gen-icon
-npx electron-builder --mac dmg zip --publish never
+npx electron-builder --mac dmg zip --publish never --config.mac.notarize=true
 
 echo ""
 echo "✓ Done. Artifacts are in dist/:"

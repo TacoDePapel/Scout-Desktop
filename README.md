@@ -6,7 +6,7 @@
 
 Grab the latest build from the **[Releases page](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)** — it always contains every fix on `main`:
 
-- **macOS** (Intel + Apple Silicon, one universal file) — download `Scout Mac.dmg`, open it, drag **Scout** into **Applications**, then double-click **"Open me first.command"** in the same DMG window. That's a one-time Gatekeeper unblock (the build is unsigned) — after it, Scout opens like any other app.
+- **macOS** (Intel + Apple Silicon, one universal file) — download `Scout Mac.dmg`, open it, drag **Scout** into **Applications**. If macOS blocks the first launch ("unidentified developer"), double-click **"Open me first.command"** in the same DMG window — a one-time Gatekeeper unblock only needed for unsigned builds.
 - **Windows** — download and run `Scout Windows.exe`.
 - **Linux** — download `Scout Linux.AppImage` (make it executable, then run it) or `Scout Linux.deb` (`sudo dpkg -i`).
 

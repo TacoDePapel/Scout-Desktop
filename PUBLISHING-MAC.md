@@ -34,20 +34,45 @@ all its capabilities.
 4. Your **Team ID** — https://developer.apple.com/account → Membership Details.
 5. **A Mac.** macOS builds cannot be produced on Linux or Windows.
 
-### Build it
+### Option A (recommended): let GitHub Actions sign every release
+
+The release workflow (`.github/workflows/release.yml`) signs and notarizes the
+Mac build automatically **whenever these five repo secrets exist**. Set them
+once and every future `v*` tag ships a frictionless DMG — no Mac needed on
+your desk.
+
+1. On any Mac with your Developer ID Application certificate installed, export
+   it: **Keychain Access → My Certificates → right-click the "Developer ID
+   Application: …" cert → Export** as `scout-cert.p12`, choosing an export
+   password.
+2. Base64 it: `base64 -i scout-cert.p12 | pbcopy`
+3. Add the secrets (repo → Settings → Secrets and variables → Actions, or CLI):
+
+```bash
+gh secret set MAC_CERT_P12_BASE64          # paste the base64 from step 2
+gh secret set MAC_CERT_PASSWORD            # the export password from step 1
+gh secret set APPLE_ID                     # you@example.com
+gh secret set APPLE_APP_SPECIFIC_PASSWORD  # xxxx-xxxx-xxxx-xxxx
+gh secret set APPLE_TEAM_ID                # ABCDE12345
+```
+
+4. Cut a release as usual (`git tag vX.Y.Z && git push origin vX.Y.Z`). The
+   workflow log will say "Apple secrets found — building signed + notarized".
+
+Delete `scout-cert.p12` after uploading. Without the secrets the workflow
+still works — it just builds unsigned, and users need "Open me first.command".
+
+### Option B: build locally on a Mac
 
 ```bash
 export APPLE_ID="you@example.com"
 export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export APPLE_TEAM_ID="ABCDE12345"
 
-# In package.json → build.mac, remove the line:  "identity": null,
-# (that line forces an UNSIGNED build for local testing; removing it lets
-#  electron-builder auto-detect your Developer ID certificate.)
-
 ./scripts/build-mac.sh
 ```
 
+electron-builder auto-detects the Developer ID certificate in your keychain.
 The signed, notarized `Scout Mac.dmg` lands in `dist/`.
 
 ### Verify before shipping
@@ -87,5 +112,5 @@ profile. At that point it isn't Scout anymore. Not recommended — ship the DMG.
 
 *Current config: `build.mac` uses Hardened Runtime + `build/entitlements.mac.plist`
 (required for notarization) and builds a universal (Intel + Apple Silicon) binary.
-`identity: null` is set so `npm run dist:mac` produces an unsigned app for local
-testing until you're ready to sign.*
+Signing is automatic when a Developer ID certificate is available (keychain
+locally, secrets in CI); otherwise builds are unsigned for testing.*
