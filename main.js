@@ -1229,6 +1229,12 @@ ipcMain.handle('screen-permission:open-settings', () => {
     return { ok: true }
   } catch (e) { return { error: e.message } }
 })
+ipcMain.handle('accessibility-permission:open-settings', () => {
+  try {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+    return { ok: true }
+  } catch (e) { return { error: e.message } }
+})
 
 // Settings
 ipcMain.handle('settings:get', (_, key) => readSettings()[key] ?? null)
@@ -1374,9 +1380,25 @@ ipcMain.handle('macro:list',            ()                 => macro.listMacros()
 ipcMain.handle('macro:get',             (_, { id })        => macro.getMacro(id))
 ipcMain.handle('macro:delete',          (_, { id })        => macro.deleteMacro(id))
 ipcMain.handle('macro:rename',          (_, { id, name })  => macro.renameMacro(id, name))
-ipcMain.handle('macro:start-recording', ()                       => { const r = macro.startRecording({ screenshotFn: macroScreenshot }); pushMacroState(); return r })
+// macOS gates global input hooks (uiohook capture) and synthetic input
+// (nut-js replay) behind the Accessibility permission. Check up front —
+// the raw libuiohook failure ("Failed to enable access for assistive
+// devices") tells the user nothing actionable. Passing true makes macOS
+// show its own grant prompt the first time, which adds Scout to the list.
+function accessibilityDenied() {
+  if (process.platform !== 'darwin') return null
+  try { if (systemPreferences.isTrustedAccessibilityClient(true)) return null } catch {}
+  return {
+    error: 'Scout needs macOS Accessibility permission to record and replay your clicks and keys.',
+    needsPermission: 'accessibility',
+  }
+}
+
+ipcMain.handle('macro:start-recording', ()                       => { const denied = accessibilityDenied(); if (denied) return denied; const r = macro.startRecording({ screenshotFn: macroScreenshot }); pushMacroState(); return r })
 ipcMain.handle('macro:stop-recording',  async (_, { name } = {}) => { const r = await macro.stopRecording(name); pushMacroState(); return r })
 ipcMain.handle('macro:play', async (_, { id, speed, hideWindow }) => {
+  const denied = accessibilityDenied()
+  if (denied) return denied
   return playMacroWithChrome(id, { speed, hideWindow })
 })
 ipcMain.handle('macro:stop-play', () => { const r = macro.stopPlay(); pushMacroState(); return r })

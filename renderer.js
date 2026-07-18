@@ -2805,6 +2805,15 @@ function toLocalDatetimeInput(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// macOS Accessibility permission is the gate for macro capture AND replay.
+// When main reports it's missing, walk the user to the actual switch instead
+// of dead-ending on the raw error.
+function offerAccessibilitySettings(msg) {
+  if (confirm(`${msg}\n\nIn System Settings → Privacy & Security → Accessibility, switch Scout on, then try again (quit and reopen Scout if it still fails).\n\nOpen System Settings now?`)) {
+    window.electronAPI.openAccessibilityPermissionSettings()
+  }
+}
+
 function macrosTab() {
   const d = document.createElement('div')
   d.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:16px;'
@@ -3037,7 +3046,8 @@ function macrosTab() {
       btn.textContent = '● Replaying…'
       const r = await window.electronAPI.macroPlay(m.id, { speed: Number(speedSel.value) || 1 })
       btn.disabled = false; btn.textContent = '▶ Replay'
-      if (r?.error) alert('Playback failed: ' + r.error)
+      if (r?.needsPermission === 'accessibility') offerAccessibilitySettings(r.error)
+      else if (r?.error) alert('Playback failed: ' + r.error)
     }
 
     row.querySelector('.schedule').onclick = () => {
@@ -3135,7 +3145,8 @@ function macrosTab() {
       await window.electronAPI.macroStopPlay()
     } else {
       const r = await window.electronAPI.macroStartRecording()
-      if (r?.error) alert(r.error)
+      if (r?.needsPermission === 'accessibility') offerAccessibilitySettings(r.error)
+      else if (r?.error) alert(r.error)
     }
   }
 
