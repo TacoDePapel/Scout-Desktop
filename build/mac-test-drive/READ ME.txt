@@ -1,0 +1,19 @@
+SCOUT — MAC TEST DRIVE
+======================
+
+1. Double-click "Install Scout.command".
+
+   If your Mac blocks it ("unidentified developer"):
+   right-click the file, choose "Open", then click "Open" again.
+
+   Still blocked? (newest Macs): Apple menu > System Settings >
+   Privacy & Security > scroll down > click "Open Anyway".
+
+2. That's it. Scout installs itself into Applications and opens.
+
+3. The first time you record, your Mac will ask for permissions
+   (Accessibility, Screen Recording). Allow them — and after turning
+   on Screen Recording, quit Scout and open it again (macOS rule).
+
+Questions or something breaks? Tell us what you clicked and what the
+screen said: https://github.com/TacoDePapel/Scout-Desktop/issues
