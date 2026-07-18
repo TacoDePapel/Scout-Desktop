@@ -21,6 +21,25 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
 }
 
+// GUI apps launched from Finder/Dock inherit launchd's minimal PATH
+// (/usr/bin:/bin:…) — no Homebrew, no nvm/npm globals. The agent's bash tool
+// then can't find node/brew/etc. even though they work fine in the user's
+// terminal. Resolve the real login-shell PATH once at startup; the markers
+// guard against rc files that echo their own output.
+if (process.platform === 'darwin') {
+  exec(`${process.env.SHELL || '/bin/zsh'} -ilc 'printf "__SCOUT_PATH_START__%s__SCOUT_PATH_END__" "$PATH"'`,
+    { timeout: 4000 }, (err, stdout) => {
+      const m = !err && (stdout || '').match(/__SCOUT_PATH_START__(.*)__SCOUT_PATH_END__/s)
+      if (m && m[1].includes('/')) {
+        process.env.PATH = m[1]
+      } else {
+        for (const p of ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin']) {
+          if (!process.env.PATH.split(':').includes(p)) process.env.PATH = `${p}:${process.env.PATH}`
+        }
+      }
+    })
+}
+
 // Single-instance guard
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0) }
 

@@ -25,5 +25,11 @@
   <!-- Microphone: Scout records narration for skill guides. -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
+
+  <!-- Apple events: the active-window helper asks System Events for the
+       focused app/window name (osascript). Without this, a hardened-runtime
+       signed build gets denied with no prompt. -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
 </dict>
 </plist>

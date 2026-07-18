@@ -6,7 +6,11 @@
 
 Grab the latest build from the **[Releases page](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)** — it always contains every fix on `main`:
 
-- **macOS** (Intel + Apple Silicon, one universal file) — download `Scout Mac.dmg`, open it, drag **Scout** into **Applications**. If macOS blocks the first launch ("unidentified developer"), double-click **"Open me first.command"** in the same DMG window — a one-time Gatekeeper unblock only needed for unsigned builds.
+- **macOS** (Intel + Apple Silicon, one universal file) — download `Scout Mac.dmg`, open it, drag **Scout** into **Applications**. If macOS blocks the first launch ("unidentified developer"), double-click **"Open me first.command"** in the same DMG window — a one-time Gatekeeper unblock only needed for unsigned builds. If macOS blocks *that* too (macOS 15 Sequoia is stricter): right-click it → **Open**, or go to **System Settings → Privacy & Security**, scroll down to the "was blocked" notice and click **Open Anyway** — or paste this in Terminal:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Scout.app && open /Applications/Scout.app
+  ```
 - **Windows** — download and run `Scout Windows.exe`.
 - **Linux** — download `Scout Linux.AppImage` (make it executable, then run it) or `Scout Linux.deb` (`sudo dpkg -i`).
 
@@ -25,6 +29,11 @@ so you can just follow the prompts — but here's the full list so nothing surpr
 
 If clicks record but *keystrokes* don't, also switch Scout on under
 **Input Monitoring** in the same Privacy & Security list, then reopen Scout.
+
+Two more Mac notes: wherever the docs say `Alt`, that's the **Option (⌥)** key
+(record macro = ⌥⇧K, abort replay = ⌥⇧Esc). And the first time a recorded
+skill looks up the focused window, macOS asks to allow Scout to control
+**System Events** — that's the standard Automation prompt; allow it.
 
 > Running from source instead of the DMG? The permission lists will show
 > **Electron** (or your terminal app) instead of "Scout" — enable that entry.
@@ -98,6 +107,11 @@ npm start
 ---
 
 ## What's New
+
+**July 18, 2026 — v2.4.3**
+- **The AI agent finds your tools on Mac.** Apps launched from Finder don't inherit your terminal's PATH, so the background agent couldn't see Homebrew, node, or npm on installed builds. Scout now reads your real login-shell PATH at startup.
+- **Install instructions that survive macOS Sequoia.** The README covers every Gatekeeper path — including when macOS blocks the unblock helper itself — plus the System Events prompt and the Option-key mapping.
+- **Ready for signed builds.** Apple-events entitlement and usage description added so window-detection keeps working once releases are signed and notarized.
 
 **July 18, 2026 — v2.4.2**
 - **No more permission dead ends on macOS.** Hitting record without Accessibility or Screen Recording enabled used to fail with a cryptic error (or silently, from the tray/hotkey). Scout now detects the missing permission, explains it in plain language, and opens the exact System Settings pane — including from the menu-bar tray and the `Alt+Shift+K` hotkey.

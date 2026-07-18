@@ -1,6 +1,6 @@
 {
   "name": "scout-desktop",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "description": "Scout — AI workflow capture and desktop agent by Orage AI Agency",
   "main": "main.js",
   "author": "Orage AI Agency <team@orage.agency>",
@@ -77,7 +77,8 @@
         "NSMicrophoneUsageDescription": "Scout records your microphone to capture narration for skill guides.",
         "NSCameraUsageDescription": "Scout does not use the camera.",
         "NSScreenCaptureDescription": "Scout captures screenshots of your desktop for the screen monitor and for the agent to see what is on screen.",
-        "NSAccessibilityUsageDescription": "Scout needs Accessibility access to record and replay your keyboard and mouse actions."
+        "NSAccessibilityUsageDescription": "Scout needs Accessibility access to record and replay your keyboard and mouse actions.",
+        "NSAppleEventsUsageDescription": "Scout asks System Events for the name of the focused app and window so recorded skills can mention them."
       }
     },
     "dmg": {
