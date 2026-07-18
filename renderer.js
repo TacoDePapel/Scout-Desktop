@@ -933,13 +933,37 @@ async function startRecording() {
     const sources = await window.electronAPI.getSources()
     primaryScreen = (sources || []).find(s => /^screen:/.test(s.id)) || (sources || [])[0]
   } catch (e) { console.warn('[REC] getSources failed:', e) }
-  if (!primaryScreen) { alert("Scout couldn't find a screen to record."); return }
-  await window.electronAPI.setSelectedSource(primaryScreen.id)
+
+  if (primaryScreen) {
+    await window.electronAPI.setSelectedSource(primaryScreen.id)
+  } else if (window.electronAPI.platform === 'darwin') {
+    // Empty source list on macOS almost always means Screen Recording
+    // permission was denied or never granted — send the user to the actual
+    // switch instead of dead-ending.
+    const status = await window.electronAPI.getScreenPermission().catch(() => 'unknown')
+    if (status !== 'granted') {
+      if (confirm('Scout needs macOS Screen Recording permission.\n\nIn System Settings → Privacy & Security → Screen Recording, switch Scout on, then quit and reopen Scout.\n\nOpen System Settings now?')) {
+        window.electronAPI.openScreenPermissionSettings()
+      }
+      return
+    }
+  }
+  // Even when enumeration comes back empty, getDisplayMedia can still succeed
+  // via the OS picker/portal (Wayland especially) — so fall through and try.
 
   let screenStream
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
-  } catch (e) { console.error('Screen capture failed:', e); return }
+  } catch (e) {
+    console.error('Screen capture failed:', e)
+    const p = window.electronAPI.platform
+    alert(p === 'linux'
+      ? "Scout couldn't capture the screen. On Wayland this needs xdg-desktop-portal and PipeWire running (or log in with an Xorg/X11 session), then try again."
+      : p === 'darwin'
+        ? "Scout couldn't capture the screen. Make sure Scout is enabled in System Settings → Privacy & Security → Screen Recording, then quit and reopen Scout."
+        : "Scout couldn't capture the screen. Another app or policy may be blocking screen capture — try again.")
+    return
+  }
 
   // No-friction: always try mic. If denied at OS level, recording continues without it.
   let micStream = null

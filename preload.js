@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Recording
   getSources:        ()           => ipcRenderer.invoke('get-sources'),
   setSelectedSource: (id)         => ipcRenderer.invoke('set-selected-source', id),
+  getScreenPermission:          () => ipcRenderer.invoke('screen-permission:status'),
+  openScreenPermissionSettings: () => ipcRenderer.invoke('screen-permission:open-settings'),
   getSettings:       (key)        => ipcRenderer.invoke('settings:get', key),
   setSettings:       (key, value) => ipcRenderer.invoke('settings:set', key, value),
   saveFile:          (opts)       => ipcRenderer.invoke('save-file', opts),

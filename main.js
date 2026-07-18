@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, shell, safeStorage, Tray, Menu, nativeImage, Notification, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, globalShortcut, dialog, shell, safeStorage, systemPreferences, Tray, Menu, nativeImage, Notification, screen } = require('electron')
 const path    = require('path')
 const fs      = require('fs')
 const os      = require('os')
@@ -12,6 +12,14 @@ const macro   = require('./lib/macro')
 // Minor perf hit from software compositing, but the window actually paints —
 // which is the bar for a UI app.
 app.disableHardwareAcceleration()
+
+// Wayland has no direct screen enumeration — capture goes through the
+// PipeWire / xdg-desktop-portal path. Without this flag desktopCapturer
+// returns an empty source list and recording dead-ends with "couldn't find
+// a screen". No-op on X11.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+}
 
 // Single-instance guard
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0) }
@@ -1207,6 +1215,20 @@ ipcMain.handle('get-sources', async () => {
   return sources.map(s => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }))
 })
 ipcMain.handle('set-selected-source', (_, id) => { selectedSourceId = id })
+
+// macOS Screen Recording permission (TCC). An empty getSources result on
+// macOS almost always means this was denied — surface that instead of a
+// generic dead end. Other platforms have no equivalent gate.
+ipcMain.handle('screen-permission:status', () => {
+  if (process.platform !== 'darwin') return 'granted'
+  try { return systemPreferences.getMediaAccessStatus('screen') } catch { return 'unknown' }
+})
+ipcMain.handle('screen-permission:open-settings', () => {
+  try {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
+    return { ok: true }
+  } catch (e) { return { error: e.message } }
+})
 
 // Settings
 ipcMain.handle('settings:get', (_, key) => readSettings()[key] ?? null)
