@@ -2,6 +2,35 @@
 
 ## Install on any computer (Windows · macOS · Linux)
 
+### Easiest: download the installer
+
+Grab the latest build from the **[Releases page](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)** — it always contains every fix on `main`:
+
+- **macOS** (Intel + Apple Silicon, one universal file) — download `Scout Mac.dmg`, open it, drag **Scout** into **Applications**, then double-click **"Open me first.command"** in the same DMG window. That's a one-time Gatekeeper unblock (the build is unsigned) — after it, Scout opens like any other app.
+- **Windows** — download and run `Scout Windows.exe`.
+- **Linux** — download `Scout Linux.AppImage` (make it executable, then run it) or `Scout Linux.deb` (`sudo dpkg -i`).
+
+#### First run on a Mac — grant three permissions once
+
+macOS gates the things Scout exists to do behind Privacy & Security switches.
+Scout detects each missing permission and walks you to the exact Settings pane,
+so you can just follow the prompts — but here's the full list so nothing surprises you:
+
+1. **Accessibility** — needed to record and replay your clicks and keystrokes.
+   macOS prompts the first time you hit record in Macros; switch **Scout** on.
+2. **Screen Recording** — needed for screen capture in the Record tab and
+   macro screenshots. After switching it on, **quit and reopen Scout** —
+   macOS only applies this one on relaunch.
+3. **Microphone** — optional, only used when you narrate a recording.
+
+If clicks record but *keystrokes* don't, also switch Scout on under
+**Input Monitoring** in the same Privacy & Security list, then reopen Scout.
+
+> Running from source instead of the DMG? The permission lists will show
+> **Electron** (or your terminal app) instead of "Scout" — enable that entry.
+
+### Or: run from source
+
 Scout runs from source with three commands. This works identically on every OS —
 `npm install` automatically fetches the right native binaries for that machine.
 
@@ -48,6 +77,12 @@ the `Scout-Desktop` folder and run `npm start`.
 
 ### Updating to the latest version
 
+Installed from a DMG/EXE/AppImage? Download the newest one from the
+[Releases page](https://github.com/TacoDePapel/Scout-Desktop/releases/latest)
+and install it over the old one — settings and saved macros are kept.
+
+Running from source:
+
 ```bash
 cd Scout-Desktop
 git pull
@@ -63,6 +98,11 @@ npm start
 ---
 
 ## What's New
+
+**July 18, 2026 — v2.4.2**
+- **No more permission dead ends on macOS.** Hitting record without Accessibility or Screen Recording enabled used to fail with a cryptic error (or silently, from the tray/hotkey). Scout now detects the missing permission, explains it in plain language, and opens the exact System Settings pane — including from the menu-bar tray and the `Alt+Shift+K` hotkey.
+- **Screen recording works on Wayland.** Linux screen capture now goes through PipeWire/xdg-desktop-portal, so the Record tab no longer dies with "couldn't find a screen" on modern Ubuntu/Fedora.
+- **Recording start is more resilient everywhere.** If screen enumeration fails, Scout still attempts capture through the OS picker before giving up — and when it does give up, the message tells you exactly what to fix for your OS.
 
 **June 27, 2026 — v2.4.0**
 - **Replay speed multiplier.** Each macro row has a `1× / 2× / 5×` selector. Run a 90-second form-fill in 18 seconds when you don't care about looking natural.

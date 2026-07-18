@@ -1077,7 +1077,7 @@ function buildTrayMenu() {
       click: async () => {
         if (recState.recording) await macro.stopRecording()
         else if (plyState.playing) macro.stopPlay()
-        else macro.startRecording({ screenshotFn: macroScreenshot })
+        else startMacroRecordingChecked()
         pushMacroState()
       } },
     { label: agentBrowserVisible ? 'Hide Agent Browser' : 'Show Agent Browser',
@@ -1358,6 +1358,28 @@ async function macroScreenshot() {
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1024, height: 576 } })
     return sources[0] ? sources[0].thumbnail.toJPEG(60).toString('base64') : null
   } catch { return null }
+}
+
+// Start macro recording from main-process triggers (tray, global hotkey),
+// where there may be no visible window to surface an error in. Failures —
+// especially the macOS Accessibility gate — get a native dialog instead of
+// being silently dropped.
+function startMacroRecordingChecked() {
+  const r = accessibilityDenied() || macro.startRecording({ screenshotFn: macroScreenshot })
+  if (r?.needsPermission === 'accessibility') {
+    dialog.showMessageBox({
+      type: 'warning',
+      message: 'Scout needs macOS Accessibility permission',
+      detail: `${r.error}\n\nSwitch Scout on under System Settings → Privacy & Security → Accessibility, then try again (quit and reopen Scout if it still fails).`,
+      buttons: ['Open System Settings', 'Not now'],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+    })
+  } else if (r?.error) {
+    dialog.showMessageBox({ type: 'error', message: 'Could not start macro recording', detail: r.error })
+  }
+  return r
 }
 
 function pushMacroState() {
@@ -1749,7 +1771,7 @@ app.whenReady().then(async () => {
     }
     if (macro.recorderState().recording)   { void macro.stopRecording().then(() => pushMacroState()) }
     else if (macro.playerState().playing)  macro.stopPlay()
-    else                                   macro.startRecording({ screenshotFn: macroScreenshot })
+    else                                   startMacroRecordingChecked()
     pushMacroState()
   })
 
