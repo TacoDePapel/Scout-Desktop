@@ -81,7 +81,6 @@
         "NSAccessibilityUsageDescription": "Scout needs Accessibility access to record and replay your keyboard and mouse actions."
       }
     },
-    "//_signing_note": "identity is null so `npm run dist:mac` builds an UNSIGNED app for local testing. To ship: remove the identity line (electron-builder auto-detects your Developer ID cert) and set APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID env vars, then run scripts/build-mac.sh. See PUBLISHING-MAC.md.",
     "dmg": {
       "title": "Scout ${version}",
       "writeUpdateInfo": false,
